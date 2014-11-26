@@ -81,9 +81,9 @@ int main(int argc, char **argv) {
 	std::vector<idx> intet;
 
 	for (idx i = 0; i < m.vertices().size(); i++) {
-		if (m.vertices()[i].aliases().size() > 0) {
+		if (m.vertices(i).aliases().size() > 0) {
 			idx tet;
-			double sa = belong(m.vertices()[i], omega, tet);
+			double sa = belong(m.vertices(i), omega, tet);
 			iface.push_back(std::pair<idx, double>(i, sa));
 			intet.push_back(tet);
 		}
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
 
 	std::vector<int> owner(iface.size());
 	for (int i = 0; i < iface.size(); i++) {
-		const vertex &v = m.vertices()[iface[i].first];
+		const vertex &v = m.vertices(iface[i].first);
 		owner[i] = -1;
 		double bv = 1 + 1e-8;
 
@@ -158,7 +158,7 @@ int main(int argc, char **argv) {
 	std::vector<int> varno(nP, -2);
 	std::vector<int> allowner(nP, -1);
 	for (idx g = 0; g < m.faces().size(); g++) {
-		const face &f = m.faces()[g];
+		const face &f = m.faces(g);
 		if (f.is_border())
 			for (int j = 0; j < 3; j++)
 				varno[f.p(j).idx()] = -1;
@@ -171,7 +171,7 @@ int main(int argc, char **argv) {
 	for (int i = 0; i < nP; i++) {
 		if (allowner[i] != -1) {
 			int dom = allowner[i];
-			auto &alias = m.vertices()[i].aliases();
+			auto &alias = m.vertices(i).aliases();
 			MESH3D_ASSERT(alias.size());
 			int rid;
 			if (dom != rank) {
@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
 	std::vector<double> Ip(nT);
 
 	for (int i = 0; i < nT; i++) {
-		const tetrahedron &tet = m.tets()[i];
+		const tetrahedron &tet = m.tets(i);
 		if (tet.color() == 1) {
 			kappa[i] = 11;
 			Ip[i] = 1;
@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
 	}
 
 	for (int i = 0; i < nP; i++) {
-		const vertex &v = m.vertices()[i];
+		const vertex &v = m.vertices(i);
 		pts[i].x = v.r().x;
 		pts[i].y = v.r().y;
 		pts[i].z = v.r().z;
@@ -349,7 +349,7 @@ int main(int argc, char **argv) {
 	for (int i = 0; i < nP; i++) {
 		if (varno[i] >= 0)
 			continue;
-		int itet = m.vertices()[i].tetrahedrons().front().t->idx();
+		int itet = m.vertices(i).tetrahedrons().front().t->idx();
 		int face;
 		point r(pts[i]);
 		double a = 1, b = 0;
