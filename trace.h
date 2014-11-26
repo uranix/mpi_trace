@@ -34,7 +34,7 @@ struct point {
 struct point4 {
 	double x, y, z, w;
 	point4(double x, double y, double z, double w)
-	: x(x), y(y), z(z), w(w) 
+	: x(x), y(y), z(z), w(w)
 	{ }
 };
 

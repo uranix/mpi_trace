@@ -17,37 +17,186 @@ double volume(const vector &p1, const vector &p2, const vector &p3, const vector
 	return 1. / 6 * (p3 - p4).dot((p1 - p4) % (p2 - p4));
 }
 
-double belong(const vertex &v, const vector &omega, idx &best) {
+struct VertTetQual {
+    idx vertIdx;
+    idx tetIdx;
+    double qual;
+
+    VertTetQual(idx vertIdx, idx tetIdx, double qual) : vertIdx(vertIdx), tetIdx(tetIdx), qual(qual) { }
+};
+
+VertTetQual bestTetWithRay(const vertex &v, const vector &omega) {
 	auto &tets = v.tetrahedrons();
-	double sum = 1e3;
-	best = BAD_INDEX;
-	for (auto it = tets.begin(); it != tets.end(); it++) {
-		const tetrahedron &tet = *(it->t);
-		const vector rr = tet.p(it->li).r() - omega;
+	double minsa = 1e3;
+	idx best = BAD_INDEX;
+
+	for (auto tetVertex : tets) {
+		const tetrahedron &tet = *(tetVertex.t);
+        const int localIndex = tetVertex.li;
+		const vector rr = tet.p(localIndex).r() - omega;
+
 		double V[4];
 		V[0] = volume(rr, tet.p(1).r(), tet.p(2).r(), tet.p(3).r());
 		V[1] = volume(tet.p(0).r(), rr, tet.p(2).r(), tet.p(3).r());
 		V[2] = volume(tet.p(0).r(), tet.p(1).r(), rr, tet.p(3).r());
 		V[3] = volume(tet.p(0).r(), tet.p(1).r(), tet.p(2).r(), rr);
+
 		double Vtot = 0;
 		double Vabs = 0;
 		for (int j = 0; j < 4; j++)
-			if (j != it->li) {
+			if (j != localIndex) {
 				Vtot += V[j];
 				Vabs += fabs(V[j]);
 			}
-		double sa = Vabs / Vtot;
-		if (sa < 0)
-			sa = 2;
-		if (sa < sum) {
-			sum = sa;
+
+		double sa = Vabs / fabs(Vtot);
+
+		if (sa < minsa) {
+			minsa = sa;
 			best = tet.idx();
 		}
 	}
-	return sum;
+	return VertTetQual(v.idx(), best, minsa);
 }
 
+struct DirectionSolver {
+    const int rank, procs;
+    std::fstream meshfile;
+    mesh m;
+    const vector omega;
 
+    std::vector<VertTetQual> interface;
+    std::vector<int> owner;
+
+    DirectionSolver(int size, int rank, const std::string &prefix, const vector &omega) :
+        procs(size), rank(rank),
+        meshfile(tiny::format("%s.%d.m3d", prefix, rank), std::ios::in | std::ios::binary),
+        m(meshfile),
+        omega(omega),
+    {
+        if (m.domains() != procs || m.domain() != rank)
+            throw std::invalid_argument("MPI rank or size and mesh rank or size mismatched");
+
+	    std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
+    }
+
+    void splitInterface() {
+        for (idx i = 0; i < m.vertices().size(); i++)
+            if (m.vertices(i).aliases().size() > 0) {
+                auto best = bestTetWithRay(m.vertices(i), omega);
+                interface.push_back(best);
+            }
+    }
+
+    void selectOwners() {
+        std::vector<int> iface_sizes(procs);
+        std::vector<int> starts(procs + 1);
+        iface_sizes[rank] = interface.size();
+        MPI::COMM_WORLD.Allgather(&iface_sizes[rank], 1, MPI::INT, &iface_sizes[0], 1, MPI::INT);
+        starts[0] = 0;
+        for (int i = 0; i < size; i++)
+            starts[i + 1] = starts[i] + iface_sizes[i];
+
+        std::vector<int> vertexIndicesPerDomain(starts.back());
+        std::vector<double> qualValues(starts.back());
+
+        for (int j = 0; j < iface_sizes[rank]; j++) {
+            vertexIndicesPerDomain[starts[rank] + j] = interface[j].vertIdx;
+            qualValues            [starts[rank] + j] = interface[j].qual;
+        }
+
+        MPI::COMM_WORLD.Allgatherv(
+            &vertexIndicesPerDomain[starts[rank]], iface_sizes[rank], MPI::INT, &vertexIndicesPerDomain[0],
+            &iface_sizes[0], &starts[0], MPI::INT
+        );
+        MPI::COMM_WORLD.Allgatherv(
+            &qualValues[starts[rank]], iface_sizes[rank], MPI::DOUBLE, &qualValues[0],
+            &iface_sizes[0], &starts[0], MPI::DOUBLE
+        );
+
+        owner.resize(interface.size());
+        for (int i = 0; i < iface.size(); i++) {
+            const vertex &v = m.vertices(interface[i].vertIdx);
+            owner[i] = -1;
+            double bestQual = 1 + 1e-8;
+
+            if (interface[i].qual < bestQual) {
+                bestQual = interface[i].qual;
+                owner[i] = rank;
+            }
+
+            for (auto it : v.aliases()) {
+                int dom = it.first;
+                int rid = it.second;
+
+                int pos = std::lower_bound(&local_index[starts[dom]], &local_index[starts[dom+1]], rid) - &local_index[0];
+                MESH3D_ASSERT(local_index[pos] == rid);
+                if (qualValues[pos] < bestQual) {
+                    owner[i] = dom;
+                    bestQual = qualValues[pos];
+                }
+            }
+            MESH3D_ASSERT(owner[i] != -1);
+        }
+    }
+
+    size_t computeVertToVarMap() {
+        std::vector<int> unknownVert;
+        for (int i = 0; i < interface.size(); i++) {
+            if (owner[i] == rank)
+                unknownVert.push_back(interface[i].vertIdx);
+        }
+
+        std::vector<int> unknownSize(procs);
+        std::vector<int> starts(procs + 1);
+        unknownSize[rank] = unknownVert.size();
+        MPI::COMM_WORLD.Allgather(&unknownSize[rank], 1, MPI::INT, &unknownSize[0], 1, MPI::INT);
+        starts[0] = 0;
+        for (int i = 0; i < size; i++)
+            starts[i + 1] = starts[i] + unknownSize[i];
+
+        std::vector<int> allUnknownVert(starts.back());
+        for (int i = 0; i < unknownVert.size(); i++)
+            allUnknownVert[starts[rank] + i] = unknownVert[i];
+
+        MPI::COMM_WORLD.Allgatherv(&allUnknownVert[starts[rank]], unknownSize[rank], MPI::INT, &allUnknownVert[0],
+            &unknownSize[0], &starts[0], MPI::INT);
+
+        int nP = m.vertices().size();
+
+        std::vector<int> vertToVarMap(nP, -2);
+        for (idx g = 0; g < m.faces().size(); g++) {
+            const face &f = m.faces(g);
+            if (f.is_border())
+                for (int j = 0; j < 3; j++)
+                    vertToVarMap[f.p(j).idx()] = -1;
+        }
+
+        for (int j = 0; j < interface.size(); j++) {
+            int dom = owner[j];
+            index i = interface[j].vertIdx;
+            auto &alias = m.vertices(i).aliases();
+            MESH3D_ASSERT(alias.size());
+            int rid;
+            if (dom != rank) {
+                auto it = alias.find(dom);
+                MESH3D_ASSERT(it != alias.end());
+                rid = it->second;
+            } else
+                rid = i;
+            vertToVarMap[i] = std::lower_bound(&allUnknownVert[starts[dom]], &allUnknownVert[starts[dom + 1]], rid) - &allUnknownVert[0];
+        }
+
+        return allUnknownVert.size();
+    }
+
+    void traceFromBoundary() {
+    }
+
+    void assembleAndSolveSystem() {
+    }
+
+};
 
 int main(int argc, char **argv) {
 	MPI::Init(argc, argv);
@@ -60,133 +209,26 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	std::fstream meshfile(tiny::format("%s.%d.m3d", argv[1], rank).c_str(), std::ios::in | std::ios::binary);
-	mesh m(meshfile);
-	if (m.domains() != size || m.domain() != rank) {
-		std::cerr << "MPI rank or size and mesh rank or size mismatched" << std::endl;
-		MPI::Finalize();
-		return 2;
-	}
+	vector omega(1, 2, 3);
+	omega *= 1 / omega.norm();
 
-	std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
+    if (!rank)
+		std::cout << "omega = " << omega << std::endl;
+
+    DirectionSolver ds(size, rank, argv[1], omega);
 
 	double start = MPI::Wtime();
 
-	vector omega(1, 2, 3);
-	omega *= 1 / omega.norm();
+    ds.splitInterface();
+
+    ds.selectOwners();
+
+    size_t totalUnknows = ds.computeVertToVarMap();
+
 	if (!rank)
-		std::cout << "omega = " << omega << std::endl;
+		std::cout << "Total unknowns: " << totalUnknows << std::endl;
 
-	std::vector<std::pair<idx, double>> iface;
-	std::vector<idx> intet;
-
-	for (idx i = 0; i < m.vertices().size(); i++) {
-		if (m.vertices(i).aliases().size() > 0) {
-			idx tet;
-			double sa = belong(m.vertices(i), omega, tet);
-			iface.push_back(std::pair<idx, double>(i, sa));
-			intet.push_back(tet);
-		}
-	}
-
-	std::vector<int> num_aliases(size);
-	num_aliases[rank] = iface.size();
-	MPI::COMM_WORLD.Allgather(&num_aliases[rank], 1, MPI::INT, &num_aliases[0], 1, MPI::INT);
-	std::vector<int> starts(size + 1);
-	starts[0] = 0;
-	for (int i = 0; i < size; i++)
-		starts[i + 1] = starts[i] + num_aliases[i];
-	
-	std::vector<int> local_index(starts.back());
-	std::vector<double> belong_value(starts.back());
-
-	for (int j = 0; j < num_aliases[rank]; j++) {
-		local_index[starts[rank] + j] = iface[j].first;
-		belong_value[starts[rank] + j] = iface[j].second;
-	}
-
-	MPI::COMM_WORLD.Allgatherv(&local_index[starts[rank]], num_aliases[rank], MPI::INT, &local_index[0], 
-		&num_aliases[0], &starts[0], MPI::INT);
-	MPI::COMM_WORLD.Allgatherv(&belong_value[starts[rank]], num_aliases[rank], MPI::DOUBLE, &belong_value[0], 
-		&num_aliases[0], &starts[0], MPI::DOUBLE);
-
-	std::vector<int> owner(iface.size());
-	for (int i = 0; i < iface.size(); i++) {
-		const vertex &v = m.vertices(iface[i].first);
-		owner[i] = -1;
-		double bv = 1 + 1e-8;
-
-		if (iface[i].second < bv) {
-			bv = iface[i].second;
-			owner[i] = rank;
-		}
-
-		for (auto it = v.aliases().begin(); it != v.aliases().end(); it++) {
-			int dom = it->first;
-			int rid = it->second;
-
-			int pos = std::lower_bound(&local_index[starts[dom]], &local_index[starts[dom+1]], rid) - &local_index[0];
-			MESH3D_ASSERT(local_index[pos] == rid);
-			if (belong_value[pos] < bv) {
-				owner[i] = dom;
-				bv = belong_value[pos];
-			}
-		}
-	}
-
-	std::vector<int> myvars;
-	for (int i = 0; i < iface.size(); i++) {
-		if (owner[i] == rank)
-			myvars.push_back(iface[i].first);
-	}
-	std::vector<int> numvars(size);
-	numvars[rank] = myvars.size();
-	MPI::COMM_WORLD.Allgather(&numvars[rank], 1, MPI::INT, &numvars[0], 1, MPI::INT);
-	starts[0] = 0;
-	for (int i = 0; i < size; i++)
-		starts[i + 1] = starts[i] + numvars[i];
-	std::vector<int> vars(starts.back());
-	for (int i = 0; i < myvars.size(); i++)
-		vars[starts[rank] + i] = myvars[i];
-	
-	MPI::COMM_WORLD.Allgatherv(&vars[starts[rank]], numvars[rank], MPI::INT, &vars[0], 
-		&numvars[0], &starts[0], MPI::INT);
-
-	int nT = m.tets().size();
-	int nP = m.vertices().size();
-
-	std::vector<int> varno(nP, -2);
-	std::vector<int> allowner(nP, -1);
-	for (idx g = 0; g < m.faces().size(); g++) {
-		const face &f = m.faces(g);
-		if (f.is_border())
-			for (int j = 0; j < 3; j++)
-				varno[f.p(j).idx()] = -1;
-	}
-
-	for (int j = 0; j < iface.size(); j++) {
-		allowner[iface[j].first] = owner[j];
-	}
-
-	for (int i = 0; i < nP; i++) {
-		if (allowner[i] != -1) {
-			int dom = allowner[i];
-			auto &alias = m.vertices(i).aliases();
-			MESH3D_ASSERT(alias.size());
-			int rid;
-			if (dom != rank) {
-				auto it = alias.find(dom);
-				MESH3D_ASSERT(it != alias.end() );
-				rid = it->second;
-			} else
-				rid = i;
-			varno[i] = std::lower_bound(&vars[starts[dom]], &vars[starts[dom + 1]], rid) - &vars[0];
-		}
-	}
-	
-	if (!rank)
-		std::cout << "Total unknowns: " << vars.size() << std::endl;
-
+    int nT = m.tets().size();
 	std::vector<tet> tets(nT);
 	std::vector<point> pts(nP);
 	std::vector<double> kappa(nT);
@@ -219,14 +261,14 @@ int main(int argc, char **argv) {
 	}
 
 	point w(omega.x, omega.y, omega.z);
-	
+
 	struct slae_row {
 		double beta;
 		double alpha[3];
 		int cols[3];
 	};
 
-	std::vector<slae_row> slae(vars.size());
+	std::vector<slae_row> slae(totalUnknows);
 
 	int count = 2;
 	MPI::Datatype oldtypes[2] = {MPI::DOUBLE, MPI::INT};
@@ -267,19 +309,19 @@ int main(int argc, char **argv) {
 		}
 
 		for (int k = 0; k < 3; k++)
-			MESH3D_ASSERT(varno[vout[k]] > -2);
+			MESH3D_ASSERT(vertToVarMap[vout[k]] > -2);
 
-		int row = varno[i];
+		int row = vertToVarMap[i];
 
 		slae[row].beta = b;
 		for (int k = 0; k < 3; k++) {
 			slae[row].alpha[k] = wei[k] * a;
-			slae[row].cols[k] = varno[vout[k]];
+			slae[row].cols[k] = vertToVarMap[vout[k]];
 		}
 	}
 
-	MPI::COMM_WORLD.Gatherv(&slae[starts[rank]], numvars[rank], SLAE_ROW, &slae[0], 
-		&numvars[0], &starts[0], SLAE_ROW, 0);
+	MPI::COMM_WORLD.Gatherv(&slae[starts[rank]], unknownSize[rank], SLAE_ROW, &slae[0],
+		&unknownSize[0], &starts[0], SLAE_ROW, 0);
 
 	std::vector<double> sol(slae.size());
 	if (!rank && slae.size() > 0) {
@@ -328,7 +370,7 @@ int main(int argc, char **argv) {
 				if (col != -1)
 					res -= slae[i].alpha[j] * sol[col];
 			}
-			
+
 			if (fabs(res) > norm)
 				norm = fabs(res);
 		}
@@ -340,14 +382,14 @@ int main(int argc, char **argv) {
 	std::vector<double> u(nP, 0);
 
 	for (int i = 0; i < nP; i++) {
-		int j = varno[i];
+		int j = vertToVarMap[i];
 		if (j < 0)
 			continue;
 		u[i] = sol[j];
 	}
-	
+
 	for (int i = 0; i < nP; i++) {
-		if (varno[i] >= 0)
+		if (vertToVarMap[i] >= 0)
 			continue;
 		int itet = m.vertices(i).tetrahedrons().front().t->idx();
 		int face;
