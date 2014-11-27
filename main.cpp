@@ -32,7 +32,8 @@ struct VertTetQual {
 
 VertTetQual bestTetWithRay(const vertex &v, const vector &omega) {
     auto &tets = v.tetrahedrons();
-    double minsa = 1e3;
+    const double BIG_SA = 1e3;
+    double minsa = BIG_SA;
     idx best = BAD_INDEX;
 
     for (auto tetVertex : tets) {
@@ -54,7 +55,9 @@ VertTetQual bestTetWithRay(const vertex &v, const vector &omega) {
                 Vabs += fabs(V[j]);
             }
 
-        double sa = Vabs / fabs(Vtot);
+        double sa = Vabs / Vtot;
+        if (sa < 0)
+            sa = BIG_SA;
 
         if (sa < minsa) {
             minsa = sa;
@@ -266,7 +269,7 @@ struct DirectionSolver {
                 kappa[i] = 0.1;
                 Ip[i] = 0;
             }
-        }        
+        }
     }
 
     void traceFromBoundary() {
@@ -313,7 +316,7 @@ struct DirectionSolver {
                 slae[row].alpha[k] = wei[k] * a;
                 slae[row].cols[k] = vertToVarMap[vout[k]];
             }
-        }        
+        }
     }
 
     void gatherAndSolveSystem() {
@@ -382,10 +385,9 @@ struct DirectionSolver {
         int nP = m.vertices().size();
         u.assign(nP, 0);
 
-        for (int i = 0; i < nP; i++) {
-            if (vertToVarMap.count(i) == 0)
-                continue;
-            int j = vertToVarMap[i];
+        for (auto it : vertToVarMap) {
+            idx i = it.first;
+            int j = it.second;
             if (j >= 0)
                 u[i] = sol[j];
         }
@@ -394,7 +396,7 @@ struct DirectionSolver {
     void traceRest() {
         int nP = m.vertices().size();
         point w(omega.x, omega.y, omega.z);
-        
+
         for (int i = 0; i < nP; i++) {
             if (vertToVarMap.count(i) > 0 && vertToVarMap[i] >= 0)
                 continue;
@@ -452,7 +454,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    vector omega(1, 2, 3);
+    vector omega(1, 0, 0);
     omega *= 1 / omega.norm();
 
     if (!rank)
