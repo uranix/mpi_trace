@@ -1,6 +1,8 @@
 #include <meshProcessor/mesh.h>
 #include <meshProcessor/vtk_stream.h>
 
+#include "LebedevQuad.h"
+
 #include "trace.h"
 #include "umfsolve.h"
 
@@ -8,6 +10,7 @@
 #include <iostream>
 #include <fstream>
 #include <unordered_map>
+#include <memory>
 
 const int OUTER_DOMAIN = -1;
 const int NO_TET = -1;
@@ -64,9 +67,66 @@ VertTetQual bestTetWithRay(const vertex &v, const vector &omega) {
     return VertTetQual(v.idx(), best, minsa);
 }
 
+struct MeshView {
+    std::vector<point> pts;
+    std::vector<tet> tets;
+    std::vector<double> kappa;
+    std::vector<double> Ip;
+
+    MeshView(const mesh &m) {
+        convertMesh(m);
+        setParams(m);
+    }
+
+    void convertMesh(const mesh &m) {
+        int nP = m.vertices().size();
+        int nT = m.tets().size();
+
+        pts.resize(nP);
+        tets .resize(nT);
+
+        for (int i = 0; i < nT; i++) {
+            const tetrahedron &tet = m.tets(i);
+            for (int j = 0; j < 4; j++) {
+                tets[i].p[j] = tet.p(j).idx();
+                const face &f = tet.f(j).flip();
+                if (f.is_border())
+                    tets[i].neib[j] = NO_TET;
+                else
+                    tets[i].neib[j] = f.tet().idx();
+            }
+        }
+
+        for (int i = 0; i < nP; i++) {
+            const vertex &v = m.vertices(i);
+            pts[i].x = v.r().x;
+            pts[i].y = v.r().y;
+            pts[i].z = v.r().z;
+        }
+    }
+
+    void setParams(const mesh &m) {
+        int nT = m.tets().size();
+        kappa.resize(nT);
+        Ip   .resize(nT);
+
+        for (int i = 0; i < nT; i++) {
+            const tetrahedron &tet = m.tets(i);
+            if (tet.color() == 1) {
+                kappa[i] = 11;
+                Ip[i] = 1;
+            } else {
+                kappa[i] = 0.1;
+                Ip[i] = 0;
+            }
+        }
+    }
+};
+
 struct DirectionSolver {
     const int procs, rank;
     const mesh &m;
+    const MeshView &meshview;
     const vector omega;
 
     std::vector<VertTetQual> interface;
@@ -77,24 +137,19 @@ struct DirectionSolver {
     std::vector<int> unknownStarts;
 
     MPI::Datatype SLAE_ROW_TYPE;
-
     std::vector<slae_row> slae;
+    std::vector<double> sol;
+    std::vector<double> Idir;
 
-    std::vector<point> pts;
-    std::vector<tet> tets;
-    std::vector<double> kappa;
-    std::vector<double> Ip;
-    std::vector<double> u;
-
-    DirectionSolver(int size, int rank, const mesh &m, const std::string &prefix, const vector &omega) :
+    DirectionSolver(int size, int rank, const mesh &m, const MeshView &mv, const vector &omega)
+    :
         procs(size), rank(rank),
-        m(m), omega(omega)
+        m(m), meshview(mv), omega(omega)
     {
-        if (static_cast<int>(m.domains()) != procs || static_cast<int>(m.domain()) != rank)
-            throw std::invalid_argument("MPI rank or size and mesh rank or size mismatched");
-
-        std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
-
+        if (static_cast<int>(m.domains()) != procs || static_cast<int>(m.domain()) != rank) {
+            std::cout << "Mesh partition has wrong number of procs or wrong rank" << std::endl;
+            MPI::COMM_WORLD.Abort(0);
+        }
         int count = 2;
         MPI::Datatype oldtypes[2] = {MPI::DOUBLE, MPI::INT};
         int blockcounts[2] = {4, 3};
@@ -103,7 +158,13 @@ struct DirectionSolver {
         SLAE_ROW_TYPE.Commit();
     }
 
-    void splitInterface() {
+    void prepare() {
+        extractInterface();
+        selectOwners();
+        computeVertToVarMap();
+    }
+
+    void extractInterface() {
         for (idx i = 0; i < m.vertices().size(); i++)
             if (m.vertices(i).aliases().size() > 0) {
                 auto best = bestTetWithRay(m.vertices(i), omega);
@@ -165,7 +226,7 @@ struct DirectionSolver {
         }
     }
 
-    size_t computeVertToVarMap() {
+    void computeVertToVarMap() {
         std::vector<int> unknownVert;
         for (size_t i = 0; i < interface.size(); i++) {
             if (owner[i] == rank)
@@ -212,57 +273,16 @@ struct DirectionSolver {
                 rid = i;
             vertToVarMap[i] = std::lower_bound(&allUnknownVert[unknownStarts[dom]], &allUnknownVert[unknownStarts[dom + 1]], rid) - &allUnknownVert[0];
         }
-
-        return unknownStarts.back();
-    }
-
-    void convertMesh() {
-        int nP = m.vertices().size();
-        int nT = m.tets().size();
-
-        pts.resize(nP);
-        tets .resize(nT);
-
-        for (int i = 0; i < nT; i++) {
-            const tetrahedron &tet = m.tets(i);
-            for (int j = 0; j < 4; j++) {
-                tets[i].p[j] = tet.p(j).idx();
-                const face &f = tet.f(j).flip();
-                if (f.is_border())
-                    tets[i].neib[j] = NO_TET;
-                else
-                    tets[i].neib[j] = f.tet().idx();
-            }
-        }
-
-        for (int i = 0; i < nP; i++) {
-            const vertex &v = m.vertices(i);
-            pts[i].x = v.r().x;
-            pts[i].y = v.r().y;
-            pts[i].z = v.r().z;
-        }
-    }
-
-    void setParams() {
-        int nT = m.tets().size();
-        kappa.resize(nT);
-        Ip   .resize(nT);
-
-        for (int i = 0; i < nT; i++) {
-            const tetrahedron &tet = m.tets(i);
-            if (tet.color() == 1) {
-                kappa[i] = 11;
-                Ip[i] = 1;
-            } else {
-                kappa[i] = 0.1;
-                Ip[i] = 0;
-            }
-        }
     }
 
     void traceFromBoundary() {
         point w(omega.x, omega.y, omega.z);
         slae.resize(unknownStarts.back());
+
+        const auto &pts   = meshview.pts;
+        const auto &tets  = meshview.tets;
+        const auto &kappa = meshview.kappa;
+        const auto &Ip    = meshview.Ip;
 
         for (size_t j = 0; j < interface.size(); j++) {
             if (owner[j] != rank)
@@ -307,33 +327,62 @@ struct DirectionSolver {
         }
     }
 
-    void gatherAndSolveSystem() {
+    /*
+     * Gather system on rank root
+     * */
+    void gatherSystem(int root) {
         MPI::COMM_WORLD.Gatherv(&slae[unknownStarts[rank]], unknownSize[rank], SLAE_ROW_TYPE, &slae[0],
-            &unknownSize[0], &unknownStarts[0], SLAE_ROW_TYPE, 0);
-
-        std::vector<double> sol(slae.size());
-        if (rank == 0 && slae.size() > 0) {
-            umfsolve(slae, sol);
-            double error = testSlaeSolution(slae, sol);
-
-            std::cout << "Error norm : " << error << std::endl;
+            &unknownSize[0], &unknownStarts[0], SLAE_ROW_TYPE, root);
+    }
+    void solveSystem(int root) {
+        sol.resize(slae.size());
+        if (slae.size() == 0)
+            return;
+        if (root != rank)
+            return;
+        std::cout << "[rank #" << rank << "] Solving system of " << slae.size() << " eqns." << std::endl;
+        UmfSolveStatus status = umfsolve(slae, sol);
+        if (status != OK) {
+            std::cout << "UMFPack solver failed: ";
+            if (status == SYMBOLIC_FAILED)
+                std::cout << "Could not perform symbolic decomposition.";
+            if (status == NUMERIC_FAILED)
+                std::cout << "Could not perform numeric decomposition.";
+            if (status == SOLVE_FAILED)
+                std::cout << "Could not solve decomposed system.";
+            std::cout << std::endl;
+            MPI::COMM_WORLD.Abort(0);
         }
-        MPI::COMM_WORLD.Bcast(&sol[0], sol.size(), MPI::DOUBLE, 0);
+        double error = testSlaeSolution(slae, sol);
+
+        std::cout << "Error norm : " << error << std::endl;
+    }
+
+    /*
+     * Bcast sol vector from rank root
+     * */
+    void bcastSolution(int root) {
+        MPI::COMM_WORLD.Bcast(&sol[0], sol.size(), MPI::DOUBLE, root);
 
         int nP = m.vertices().size();
-        u.assign(nP, 0);
+        Idir.assign(nP, 0);
 
         for (auto it : vertToVarMap) {
             idx i = it.first;
             int j = it.second;
             if (j >= 0)
-                u[i] = sol[j];
+                Idir[i] = sol[j];
         }
     }
 
     void traceRest() {
         int nP = m.vertices().size();
         point w(omega.x, omega.y, omega.z);
+
+        const auto &pts   = meshview.pts;
+        const auto &tets  = meshview.tets;
+        const auto &kappa = meshview.kappa;
+        const auto &Ip    = meshview.Ip;
 
         for (int i = 0; i < nP; i++) {
             if (vertToVarMap.count(i) > 0 && vertToVarMap[i] >= 0)
@@ -364,21 +413,38 @@ struct DirectionSolver {
                 }
             }
 
-            u[i] = b;
+            Idir[i] = b;
             for (int k = 0; k < 3; k++)
-                u[i] += u[vout[k]] * a * wei[k];
+                Idir[i] += Idir[vout[k]] * a * wei[k];
         }
     }
+};
 
-    void saveOutput(const std::string &prefix) {
+struct AverageSolution {
+    const int rank;
+    const mesh &m;
+    const MeshView &mv;
+    std::vector<double> U;
+
+    AverageSolution(const int rank, const mesh &m, const MeshView &mv) : rank(rank), m(m), mv(mv), U(m.vertices().size(), 0.0)
+    { }
+
+    void add(const DirectionSolver &dir, const double wei) {
+        for (size_t i = 0; i < U.size(); i++)
+            U[i] += wei * dir.Idir[i];
+    }
+
+    void save(const std::string &prefix) {
+        const auto &kappa = mv.kappa;
+        const auto &Ip    = mv.Ip;
+
         vtk_stream v((prefix + "_sol." + std::to_string(rank) + ".vtk").c_str());
         v.write_header(m, "Solution");
         v.append_cell_data(&kappa[0], "kappa");
         v.append_cell_data(&Ip[0], "Ip");
-        v.append_point_data(&u[0], "u");
+        v.append_point_data(&U[0], "U");
         v.close();
     }
-
 };
 
 int main(int argc, char **argv) {
@@ -392,49 +458,83 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    vector omega(1, 0, 0);
-    omega *= 1 / omega.norm();
-
-    if (!rank)
-        std::cout << "omega = " << omega << std::endl;
-
     std::fstream meshfile(std::string(argv[1]) + "." + std::to_string(rank) + ".m3d", std::ios::binary | std::ios::in);
     mesh m(meshfile);
+    MeshView mv(m);
 
-    DirectionSolver ds(size, rank, m, argv[1], omega);
+    std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
 
-    double start = MPI::Wtime();
+    auto quad = LebedevQuadBank::lookupByOrder(10);
 
-    ds.convertMesh();
-    ds.setParams();
+    AverageSolution ave(rank, m, mv);
+    const int roundSize = 2 * size;
+    const int rounds = (quad.order + roundSize - 1) / roundSize;
 
-    double mark0 = MPI::Wtime();    
+    std::vector<std::unique_ptr<DirectionSolver> > ds(roundSize);
 
-    ds.splitInterface();
-    ds.selectOwners();
-    size_t totalUnknowns = ds.computeVertToVarMap();
+    double spent = 0, prepare = 0, boundary = 0, slae = 0, trace = 0;
 
-    if (!rank)
-        std::cout << "Total unknowns: " << totalUnknowns << std::endl;
+    for (int round = 0; round < rounds; round++) {
+        MPI::COMM_WORLD.Barrier();
+        if (!rank)
+            std::cout << "------- NEW ROUND --------" << std::endl;
 
-    double mark1 = MPI::Wtime();
-    ds.traceFromBoundary();
-    double mark2 = MPI::Wtime();
-    ds.gatherAndSolveSystem();
-    double mark3 = MPI::Wtime();
-    ds.traceRest();
-    double stop = MPI::Wtime();
+        const int active_procs = std::min(quad.order - round * roundSize, roundSize);
 
-    if (!rank) {
-        std::cout << "Time spent: " << ((stop  - start) * 1e3) << "ms" << std::endl;
-        std::cout << "  Convert : " << ((mark0 - start) * 1e3) << "ms" << std::endl;
-        std::cout << "  Prepare : " << ((mark1 - mark0) * 1e3) << "ms" << std::endl;
-        std::cout << "  Boundary: " << ((mark2 - mark1) * 1e3) << "ms" << std::endl;
-        std::cout << "  SLAE    : " << ((mark3 - mark2) * 1e3) << "ms" << std::endl;
-        std::cout << "  TraceAll: " << ((stop  - mark3) * 1e3) << "ms" << std::endl;
+        for (int j = 0; j < active_procs; j++) {
+            int i = round * roundSize + j;
+            vector omega(quad.x[i], quad.y[i], quad.z[i]);
+            ds[j] = std::unique_ptr<DirectionSolver>(new DirectionSolver(size, rank, m, mv, omega));
+        }
+
+        double start = MPI::Wtime();
+
+        for (int j = 0; j < active_procs; j++)
+            ds[j]->prepare();
+
+        double mark1 = MPI::Wtime();
+
+        for (int j = 0; j < active_procs; j++)
+            ds[j]->traceFromBoundary();
+
+        double mark2 = MPI::Wtime();
+
+        for (int j = 0; j < active_procs; j++)
+            ds[j]->gatherSystem(j % size);
+
+        for (int j = 0; j < active_procs; j++)
+            ds[j]->solveSystem(j % size);
+
+        for (int j = 0; j < active_procs; j++)
+            ds[j]->bcastSolution(j % size);
+
+        double mark3 = MPI::Wtime();
+
+        for (int j = 0; j < active_procs; j++)
+            ds[j]->traceRest();
+
+        for (int j = 0; j < active_procs; j++) {
+            int i = round * roundSize + j;
+            ave.add(*ds[j], quad.w[i]);
+        }
+
+        double stop = MPI::Wtime();
+
+        spent    += stop  - start;
+        prepare  += mark1 - start;
+        boundary += mark2 - mark1;
+        slae     += mark3 - mark2;
+        trace    += stop  - mark3;
     }
 
-    ds.saveOutput(argv[1]);
+    std::cout << "---------------------------------------------------------" << std::endl;
+    std::cout << "[" << rank << "] Time spent: " << (spent    * 1e3) << "ms" << std::endl;
+    std::cout << "[" << rank << "]   Prepare : " << (prepare  * 1e3) << "ms" << std::endl;
+    std::cout << "[" << rank << "]   Boundary: " << (boundary * 1e3) << "ms" << std::endl;
+    std::cout << "[" << rank << "]   SLAE    : " << (slae     * 1e3) << "ms" << std::endl;
+    std::cout << "[" << rank << "]   TraceAll: " << (trace    * 1e3) << "ms" << std::endl;
+
+    ave.save(argv[1]);
 
     MPI::Finalize();
     return 0;
