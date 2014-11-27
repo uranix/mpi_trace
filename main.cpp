@@ -67,6 +67,7 @@ VertTetQual bestTetWithRay(const vertex &v, const vector &omega) {
     return VertTetQual(v.idx(), best, minsa);
 }
 
+/* This struct should be entirely copied to GPU. It is shared across all directions */
 struct MeshView {
     std::vector<point> pts;
     std::vector<tet> tets;
@@ -119,7 +120,7 @@ struct MeshView {
                 kappa[i] = 11;
                 Ip[i] = 1;
             } else {
-                kappa[i] = 0.1;
+                kappa[i] = 3;
                 Ip[i] = 0;
             }
         }
@@ -135,7 +136,7 @@ struct DirectionSolver {
     std::vector<VertTetQual> interface;
     std::vector<int> owner;
     std::unordered_map<idx, int> vertToVarMap;
-    std::vector<int> isRest;
+    std::vector<bool> isInner;
 
     std::vector<int> unknownSize;
     std::vector<int> unknownStarts;
@@ -352,7 +353,7 @@ struct DirectionSolver {
             return;
         if (root != rank)
             return;
-        std::cout << "[rank #" << rank << "] Solving system of " << slae.size() << " eqns." << std::endl;
+        std::cout << "[rank #" << rank << "] Solving system of " << slae.size() << " eqns for dir = " << omega << std::endl;
         UmfSolveStatus status = umfsolve(slae, sol);
         if (status != OK) {
             std::cout << "UMFPack solver failed: ";
@@ -367,7 +368,8 @@ struct DirectionSolver {
         }
         double error = testSlaeSolution(slae, sol);
 
-        std::cout << "Error norm : " << error << std::endl;
+        if (error > 1e-14)
+            std::cout << "Error norm : " << error << std::endl;
     }
 
     /*
@@ -378,14 +380,14 @@ struct DirectionSolver {
 
         int nP = m.vertices().size();
         Idir.assign(nP, 0);
-        isRest.assign(nP, 1);
+        isInner.assign(nP, true);
 
         for (auto it : vertToVarMap) {
             idx i = it.first;
             int j = it.second;
             if (j >= 0) {
                 Idir[i] = sol[j];
-                isRest[i] = 0;
+                isInner[i] = false;
             }
         }
     }
@@ -400,21 +402,16 @@ struct DirectionSolver {
         const auto &Ip     = meshview.Ip;
         const auto &anyTet = meshview.anyTet;
 
-        for (auto it : vertToVarMap) {
-            if (it.second >= 0)
-                isRest[it.first] = 0;
-        }
-
         for (int i = 0; i < nP; i++) {
-            if (!isRest[i])
+            if (!isInner[i])
                 continue;
             int itet = anyTet[i];
-            int face;
             point r(pts[i]);
             double a = 1, b = 0;
             int vout[3];
             double wei[3];
             while (true) {
+                int face;
                 double len = trace(w, tets[itet], r, face, &pts[0]);
                 double delta = len * kappa[itet];
                 double q = exp(-delta);
@@ -500,9 +497,11 @@ int main(int argc, char **argv) {
         if (!rank)
             std::cout << "------- NEW ROUND --------" << std::endl;
 
-        const int active_procs = std::min(quad.order - round * roundSize, roundSize);
+        const int activeDirections = std::min(quad.order - round * roundSize, roundSize);
+        if (!rank)
+            std::cout << "Active directions = " << activeDirections << std::endl;
 
-        for (int j = 0; j < active_procs; j++) {
+        for (int j = 0; j < activeDirections; j++) {
             int i = round * roundSize + j;
             vector omega(quad.x[i], quad.y[i], quad.z[i]);
             ds[j] = std::unique_ptr<DirectionSolver>(new DirectionSolver(size, rank, m, mv, omega));
@@ -510,32 +509,32 @@ int main(int argc, char **argv) {
 
         double start = MPI::Wtime();
 
-        for (int j = 0; j < active_procs; j++)
+        for (int j = 0; j < activeDirections; j++)
             ds[j]->prepare();
 
         double mark1 = MPI::Wtime();
 
-        for (int j = 0; j < active_procs; j++)
+        for (int j = 0; j < activeDirections; j++)
             ds[j]->traceFromBoundary();
 
         double mark2 = MPI::Wtime();
 
-        for (int j = 0; j < active_procs; j++)
+        for (int j = 0; j < activeDirections; j++)
             ds[j]->gatherSystem(j % size);
 
-        for (int j = 0; j < active_procs; j++)
+        for (int j = 0; j < activeDirections; j++)
             ds[j]->solveSystem(j % size);
 
-        for (int j = 0; j < active_procs; j++)
+        for (int j = 0; j < activeDirections; j++)
             ds[j]->bcastSolution(j % size);
 
         double mark3 = MPI::Wtime();
 
         /* Move this to GPU */
-        for (int j = 0; j < active_procs; j++)
+        for (int j = 0; j < activeDirections; j++)
             ds[j]->traceRest();
 
-        for (int j = 0; j < active_procs; j++) {
+        for (int j = 0; j < activeDirections; j++) {
             int i = round * roundSize + j;
             ave.add(*ds[j], quad.w[i]);
         }
