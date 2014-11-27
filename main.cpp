@@ -72,6 +72,7 @@ struct MeshView {
     std::vector<tet> tets;
     std::vector<double> kappa;
     std::vector<double> Ip;
+    std::vector<int> anyTet;
 
     MeshView(const mesh &m) {
         convertMesh(m);
@@ -83,7 +84,8 @@ struct MeshView {
         int nT = m.tets().size();
 
         pts.resize(nP);
-        tets .resize(nT);
+        tets.resize(nT);
+        anyTet.resize(nP);
 
         for (int i = 0; i < nT; i++) {
             const tetrahedron &tet = m.tets(i);
@@ -102,6 +104,7 @@ struct MeshView {
             pts[i].x = v.r().x;
             pts[i].y = v.r().y;
             pts[i].z = v.r().z;
+            anyTet[i] = v.tetrahedrons().front().t->idx();
         }
     }
 
@@ -132,6 +135,7 @@ struct DirectionSolver {
     std::vector<VertTetQual> interface;
     std::vector<int> owner;
     std::unordered_map<idx, int> vertToVarMap;
+    std::vector<int> isRest;
 
     std::vector<int> unknownSize;
     std::vector<int> unknownStarts;
@@ -213,7 +217,11 @@ struct DirectionSolver {
                 int dom = it.first;
                 int rid = it.second;
 
-                int pos = std::lower_bound(&vertexIndicesPerDomain[iface_starts[dom]], &vertexIndicesPerDomain[iface_starts[dom+1]], rid) - &vertexIndicesPerDomain[0];
+                int pos = std::lower_bound(
+                        &vertexIndicesPerDomain[iface_starts[dom]],
+                        &vertexIndicesPerDomain[iface_starts[dom+1]],
+                        rid
+                    ) - &vertexIndicesPerDomain[0];
                 MESH3D_ASSERT(vertexIndicesPerDomain[pos] == rid);
                 if (qualValues[pos] < bestQual) {
                     owner[i] = dom;
@@ -271,7 +279,11 @@ struct DirectionSolver {
                 rid = it->second;
             } else
                 rid = i;
-            vertToVarMap[i] = std::lower_bound(&allUnknownVert[unknownStarts[dom]], &allUnknownVert[unknownStarts[dom + 1]], rid) - &allUnknownVert[0];
+            vertToVarMap[i] = std::lower_bound(
+                    &allUnknownVert[unknownStarts[dom]],
+                    &allUnknownVert[unknownStarts[dom + 1]],
+                    rid
+                ) - &allUnknownVert[0];
         }
     }
 
@@ -366,12 +378,15 @@ struct DirectionSolver {
 
         int nP = m.vertices().size();
         Idir.assign(nP, 0);
+        isRest.assign(nP, 1);
 
         for (auto it : vertToVarMap) {
             idx i = it.first;
             int j = it.second;
-            if (j >= 0)
+            if (j >= 0) {
                 Idir[i] = sol[j];
+                isRest[i] = 0;
+            }
         }
     }
 
@@ -379,15 +394,21 @@ struct DirectionSolver {
         int nP = m.vertices().size();
         point w(omega.x, omega.y, omega.z);
 
-        const auto &pts   = meshview.pts;
-        const auto &tets  = meshview.tets;
-        const auto &kappa = meshview.kappa;
-        const auto &Ip    = meshview.Ip;
+        const auto &pts    = meshview.pts;
+        const auto &tets   = meshview.tets;
+        const auto &kappa  = meshview.kappa;
+        const auto &Ip     = meshview.Ip;
+        const auto &anyTet = meshview.anyTet;
+
+        for (auto it : vertToVarMap) {
+            if (it.second >= 0)
+                isRest[it.first] = 0;
+        }
 
         for (int i = 0; i < nP; i++) {
-            if (vertToVarMap.count(i) > 0 && vertToVarMap[i] >= 0)
+            if (!isRest[i])
                 continue;
-            int itet = m.vertices(i).tetrahedrons().front().t->idx();
+            int itet = anyTet[i];
             int face;
             point r(pts[i]);
             double a = 1, b = 0;
@@ -510,6 +531,7 @@ int main(int argc, char **argv) {
 
         double mark3 = MPI::Wtime();
 
+        /* Move this to GPU */
         for (int j = 0; j < active_procs; j++)
             ds[j]->traceRest();
 
