@@ -17,9 +17,9 @@ include_directories(${UMFPACK_INCLUDES})
 add_executable(mesh_prepare mesh_prepare.cpp)
 target_link_libraries(mesh_prepare mesh3d ${METIS_LIBRARY})
 
-add_executable(main main.cpp trace.cpp)
+add_executable(main main.cpp trace.cpp umfsolve.cpp)
 target_link_libraries(main mesh3d ${MPI_LIBRARIES} ${UMFPACK_LIBRARIES})
-list(APPEND CMAKE_CXX_FLAGS "-std=c++0x")
+list(APPEND CMAKE_CXX_FLAGS "-std=c++0x -Wall")
 
 if (MPI_COMPILE_FLAGS)
 	set_target_properties(main PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")

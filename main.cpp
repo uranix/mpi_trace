@@ -1,10 +1,8 @@
 #include <meshProcessor/mesh.h>
 #include <meshProcessor/vtk_stream.h>
-#include <tiny/format.h>
-
-#include <umfpack.h>
 
 #include "trace.h"
+#include "umfsolve.h"
 
 #include <mpi.h>
 #include <iostream>
@@ -12,7 +10,6 @@
 #include <unordered_map>
 
 const int OUTER_DOMAIN = -1;
-const int BC_VAR = -1;
 const int NO_TET = -1;
 
 using namespace mesh3d;
@@ -68,9 +65,8 @@ VertTetQual bestTetWithRay(const vertex &v, const vector &omega) {
 }
 
 struct DirectionSolver {
-    const int rank, procs;
-    std::fstream meshfile;
-    mesh m;
+    const int procs, rank;
+    const mesh &m;
     const vector omega;
 
     std::vector<VertTetQual> interface;
@@ -80,13 +76,7 @@ struct DirectionSolver {
     std::vector<int> unknownSize;
     std::vector<int> unknownStarts;
 
-    MPI::Datatype SLAE_ROW;
-
-    struct slae_row {
-        double beta;
-        double alpha[3];
-        int cols[3];
-    };
+    MPI::Datatype SLAE_ROW_TYPE;
 
     std::vector<slae_row> slae;
 
@@ -96,13 +86,11 @@ struct DirectionSolver {
     std::vector<double> Ip;
     std::vector<double> u;
 
-    DirectionSolver(int size, int rank, const std::string &prefix, const vector &omega) :
+    DirectionSolver(int size, int rank, const mesh &m, const std::string &prefix, const vector &omega) :
         procs(size), rank(rank),
-        meshfile(tiny::format("%s.%d.m3d", prefix.c_str(), rank), std::ios::in | std::ios::binary),
-        m(meshfile),
-        omega(omega)
+        m(m), omega(omega)
     {
-        if (m.domains() != procs || m.domain() != rank)
+        if (static_cast<int>(m.domains()) != procs || static_cast<int>(m.domain()) != rank)
             throw std::invalid_argument("MPI rank or size and mesh rank or size mismatched");
 
         std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
@@ -111,8 +99,8 @@ struct DirectionSolver {
         MPI::Datatype oldtypes[2] = {MPI::DOUBLE, MPI::INT};
         int blockcounts[2] = {4, 3};
         MPI::Aint offsets[2] = {0, 4 * sizeof(double)};
-        SLAE_ROW = MPI::Datatype::Create_struct(count, blockcounts, offsets, oldtypes);
-        SLAE_ROW.Commit();
+        SLAE_ROW_TYPE = MPI::Datatype::Create_struct(count, blockcounts, offsets, oldtypes);
+        SLAE_ROW_TYPE.Commit();
     }
 
     void splitInterface() {
@@ -150,7 +138,7 @@ struct DirectionSolver {
         );
 
         owner.resize(interface.size());
-        for (int i = 0; i < interface.size(); i++) {
+        for (size_t i = 0; i < interface.size(); i++) {
             const vertex &v = m.vertices(interface[i].vertIdx);
             owner[i] = OUTER_DOMAIN;
             double bestQual = 1 + 1e-8;
@@ -179,7 +167,7 @@ struct DirectionSolver {
 
     size_t computeVertToVarMap() {
         std::vector<int> unknownVert;
-        for (int i = 0; i < interface.size(); i++) {
+        for (size_t i = 0; i < interface.size(); i++) {
             if (owner[i] == rank)
                 unknownVert.push_back(interface[i].vertIdx);
         }
@@ -194,7 +182,7 @@ struct DirectionSolver {
             unknownStarts[i + 1] = unknownStarts[i] + unknownSize[i];
 
         std::vector<int> allUnknownVert(unknownStarts.back());
-        for (int i = 0; i < unknownVert.size(); i++)
+        for (size_t i = 0; i < unknownVert.size(); i++)
             allUnknownVert[unknownStarts[rank] + i] = unknownVert[i];
 
         MPI::COMM_WORLD.Allgatherv(&allUnknownVert[unknownStarts[rank]], unknownSize[rank], MPI::INT, &allUnknownVert[0],
@@ -208,7 +196,7 @@ struct DirectionSolver {
                     vertToVarMap[f.p(j).idx()] = BC_VAR;
         }
 
-        for (int j = 0; j < interface.size(); j++) {
+        for (size_t j = 0; j < interface.size(); j++) {
             int dom = owner[j];
             if (dom == OUTER_DOMAIN)
                 continue;
@@ -276,17 +264,17 @@ struct DirectionSolver {
         point w(omega.x, omega.y, omega.z);
         slae.resize(unknownStarts.back());
 
-        for (int j = 0; j < interface.size(); j++) {
+        for (size_t j = 0; j < interface.size(); j++) {
             if (owner[j] != rank)
                 continue;
             int itet = interface[j].tetIdx;
-            int face;
             int i = interface[j].vertIdx;
             point r(pts[i]);
             double a = 1, b = 0;
             int vout[3];
             double wei[3];
             while (true) {
+                int face;
                 double len = trace(w, tets[itet], r, face, &pts[0]);
                 double delta = len * kappa[itet];
                 double q = exp(-delta);
@@ -320,65 +308,15 @@ struct DirectionSolver {
     }
 
     void gatherAndSolveSystem() {
-        MPI::COMM_WORLD.Gatherv(&slae[unknownStarts[rank]], unknownSize[rank], SLAE_ROW, &slae[0],
-            &unknownSize[0], &unknownStarts[0], SLAE_ROW, 0);
+        MPI::COMM_WORLD.Gatherv(&slae[unknownStarts[rank]], unknownSize[rank], SLAE_ROW_TYPE, &slae[0],
+            &unknownSize[0], &unknownStarts[0], SLAE_ROW_TYPE, 0);
 
         std::vector<double> sol(slae.size());
         if (rank == 0 && slae.size() > 0) {
-            int m = slae.size();
-            std::vector<int> Ap(slae.size() + 1);
-            Ap[0] = 0;
-            std::vector<double> Ax;
-            std::vector<int> Ai;
-            for (int i = 0; i < m; i++) {
-                std::vector<std::pair<int, double>> row;
+            umfsolve(slae, sol);
+            double error = testSlaeSolution(slae, sol);
 
-                row.push_back(std::pair<int, double>(i, -1.0));
-                for (int j = 0; j < 3; j++)
-                    if (slae[i].cols[j] != BC_VAR)
-                        row.push_back(std::pair<int, double>(slae[i].cols[j], slae[i].alpha[j]));
-
-                std::sort(row.begin(), row.end(), [](const std::pair<int, double> &a, const std::pair<int, double> &b) { return a.first < b.first; } );
-
-                Ap[i + 1] = Ap[i] + row.size();
-                for (auto it = row.begin(); it != row.end(); it++) {
-                    Ai.push_back(it->first);
-                    Ax.push_back(it->second);
-                }
-            }
-            void *symbolic;
-            void *numeric;
-            if (umfpack_di_symbolic(m, m, &Ap[0], &Ai[0], 0, &symbolic, 0, 0) != UMFPACK_OK) {
-                std::cerr << "Umfpack failed to perform symbolic decomposition" << std::endl;
-                MPI::COMM_WORLD.Abort(0);
-            }
-            if (umfpack_di_numeric(&Ap[0], &Ai[0], &Ax[0], symbolic, &numeric, 0, 0) != UMFPACK_OK) {
-                std::cerr << "Umfpack failed to perform numeric decomposition" << std::endl;
-                MPI::COMM_WORLD.Abort(0);
-            }
-            std::vector<double> rhs(m);
-            for (int i = 0; i < m; i++)
-                rhs[i] = -slae[i].beta;
-            if (umfpack_di_solve(UMFPACK_At, &Ap[0], &Ai[0], &Ax[0], &sol[0], &rhs[0], numeric, 0, 0) != UMFPACK_OK) {
-                std::cerr << "Umfpack failed to perform numeric decomposition" << std::endl;
-                MPI::COMM_WORLD.Abort(0);
-            }
-            std::cout << "Solve ok!" << std::endl;
-
-            double norm = 0;
-            for (int i = 0; i < m; i++) {
-                double res = sol[i] - slae[i].beta;
-                for (int j = 0; j < 3; j++) {
-                    int col = slae[i].cols[j];
-                    if (col != BC_VAR)
-                        res -= slae[i].alpha[j] * sol[col];
-                }
-
-                if (fabs(res) > norm)
-                    norm = fabs(res);
-            }
-
-            std::cout << "Error norm : " << norm << std::endl;
+            std::cout << "Error norm : " << error << std::endl;
         }
         MPI::COMM_WORLD.Bcast(&sol[0], sol.size(), MPI::DOUBLE, 0);
 
@@ -432,8 +370,8 @@ struct DirectionSolver {
         }
     }
 
-    void saveOutput() {
-        vtk_stream v(tiny::format("sol.%d.vtk", rank).c_str());
+    void saveOutput(const std::string &prefix) {
+        vtk_stream v((prefix + "_sol." + std::to_string(rank) + ".vtk").c_str());
         v.write_header(m, "Solution");
         v.append_cell_data(&kappa[0], "kappa");
         v.append_cell_data(&Ip[0], "Ip");
@@ -460,35 +398,43 @@ int main(int argc, char **argv) {
     if (!rank)
         std::cout << "omega = " << omega << std::endl;
 
-    DirectionSolver ds(size, rank, argv[1], omega);
+    std::fstream meshfile(std::string(argv[1]) + "." + std::to_string(rank) + ".m3d", std::ios::binary | std::ios::in);
+    mesh m(meshfile);
+
+    DirectionSolver ds(size, rank, m, argv[1], omega);
 
     double start = MPI::Wtime();
 
+    ds.convertMesh();
+    ds.setParams();
+
+    double mark0 = MPI::Wtime();    
+
     ds.splitInterface();
-
     ds.selectOwners();
-
     size_t totalUnknowns = ds.computeVertToVarMap();
 
     if (!rank)
         std::cout << "Total unknowns: " << totalUnknowns << std::endl;
 
-    ds.convertMesh();
-
-    ds.setParams();
-
+    double mark1 = MPI::Wtime();
     ds.traceFromBoundary();
-
+    double mark2 = MPI::Wtime();
     ds.gatherAndSolveSystem();
-
+    double mark3 = MPI::Wtime();
     ds.traceRest();
-
     double stop = MPI::Wtime();
 
-    if (!rank)
-        std::cout << "Time spent: " << ((stop - start) * 1e3) << "ms" << std::endl;
+    if (!rank) {
+        std::cout << "Time spent: " << ((stop  - start) * 1e3) << "ms" << std::endl;
+        std::cout << "  Convert : " << ((mark0 - start) * 1e3) << "ms" << std::endl;
+        std::cout << "  Prepare : " << ((mark1 - mark0) * 1e3) << "ms" << std::endl;
+        std::cout << "  Boundary: " << ((mark2 - mark1) * 1e3) << "ms" << std::endl;
+        std::cout << "  SLAE    : " << ((mark3 - mark2) * 1e3) << "ms" << std::endl;
+        std::cout << "  TraceAll: " << ((stop  - mark3) * 1e3) << "ms" << std::endl;
+    }
 
-    ds.saveOutput();
+    ds.saveOutput(argv[1]);
 
     MPI::Finalize();
     return 0;
