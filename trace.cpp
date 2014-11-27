@@ -1,5 +1,6 @@
 #include "trace.h"
 
+#include <cassert>
 #include <iostream>
 #if 0
 #define LOG if (true) std::cout 
@@ -64,7 +65,7 @@ coord trace_face(const point &w, const point &r0, const point &r1, const point &
 	return coord(bc.x, bc.y, bc.z, len);
 }
 
-double trace(const point &w, const tet &t, point &r0, int &face, const point pts[]) {
+double trace(const point &w, const tet &t, point &r0, int &face, const point *pts) {
 	coord b[4];
 	point p[8];
 
@@ -106,7 +107,7 @@ double trace(const point &w, const tet &t, point &r0, int &face, const point pts
 			len = b[j].len;
 		}
 	}
-//	assert(minj != -1);
+	assert(minj != -1);
 	face = minj;
 
 	coord out(b[minj]);
