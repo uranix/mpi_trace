@@ -37,15 +37,19 @@ struct GPUAverageSolution {
 
 struct GPUMultipleDirectionSolver {
     const int maxDirections;
-    const GPUMeshView &mv;
+    const GPUMeshViewRaw mv;
     real *Idirs;
     int *inner;
     point *w;
+
     GPUMultipleDirectionSolver(const int maxDirections, const GPUMeshView &mv, const std::vector<point> &ws);
     ~GPUMultipleDirectionSolver();
-    void setBoundary(const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner);
+
     real *Idir(const int direction);
     int *innerFlag(const int direction);
+
+    void setBoundary(const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner);
+    void traceInterior(const int startDirection, const int dirs);
 };
 
 #endif

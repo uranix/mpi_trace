@@ -417,7 +417,8 @@ int main(int argc, char **argv) {
 
     LebedevQuad quad = LebedevQuadBank::lookupByOrder(10);
 
-    std::cout << "Using " << quad.order << " directions" << std::endl;
+    if (!rank)
+        std::cout << "Using " << quad.order << " directions" << std::endl;
 
     const int roundSize = 2 * size;
     const int rounds = (quad.order + roundSize - 1) / roundSize;
@@ -472,11 +473,8 @@ int main(int argc, char **argv) {
         for (int j = 0; j < activeDirections; j++)
             gmds.setBoundary(j, ds[j]->Idir, ds[j]->isInner);
 
-//        gmds.trace()
-/*
-        for (int j = 0; j < activeDirections; j++)
-            ds[j]->traceRest();
-*/
+        gmds.traceInterior(round * roundSize, activeDirections);
+
         for (int j = 0; j < activeDirections; j++) {
             int i = round * roundSize + j;
             gas.add(gmds.Idir(j), static_cast<real>(quad.w[i]));
