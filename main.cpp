@@ -1,10 +1,14 @@
 #include <meshProcessor/mesh.h>
 #include <meshProcessor/vtk_stream.h>
 
+#include "MeshView.h"
+
 #include "LebedevQuad.h"
 
 #include "trace.h"
 #include "umfsolve.h"
+
+#include "gpu.h"
 
 #include <mpi.h>
 #include <iostream>
@@ -13,7 +17,6 @@
 #include <memory>
 
 const int OUTER_DOMAIN = -1;
-const int NO_TET = -1;
 
 using namespace mesh3d;
 typedef mesh3d::index idx;
@@ -66,66 +69,6 @@ VertTetQual bestTetWithRay(const vertex &v, const vector &omega) {
     }
     return VertTetQual(v.idx(), best, minsa);
 }
-
-/* This struct should be entirely copied to GPU. It is shared across all directions */
-struct MeshView {
-    std::vector<point> pts;
-    std::vector<tet> tets;
-    std::vector<double> kappa;
-    std::vector<double> Ip;
-    std::vector<int> anyTet;
-
-    MeshView(const mesh &m) {
-        convertMesh(m);
-        setParams(m);
-    }
-
-    void convertMesh(const mesh &m) {
-        int nP = m.vertices().size();
-        int nT = m.tets().size();
-
-        pts.resize(nP);
-        tets.resize(nT);
-        anyTet.resize(nP);
-
-        for (int i = 0; i < nT; i++) {
-            const tetrahedron &tet = m.tets(i);
-            for (int j = 0; j < 4; j++) {
-                tets[i].p[j] = tet.p(j).idx();
-                const face &f = tet.f(j).flip();
-                if (f.is_border())
-                    tets[i].neib[j] = NO_TET;
-                else
-                    tets[i].neib[j] = f.tet().idx();
-            }
-        }
-
-        for (int i = 0; i < nP; i++) {
-            const vertex &v = m.vertices(i);
-            pts[i].x = v.r().x;
-            pts[i].y = v.r().y;
-            pts[i].z = v.r().z;
-            anyTet[i] = v.tetrahedrons().front().t->idx();
-        }
-    }
-
-    void setParams(const mesh &m) {
-        int nT = m.tets().size();
-        kappa.resize(nT);
-        Ip   .resize(nT);
-
-        for (int i = 0; i < nT; i++) {
-            const tetrahedron &tet = m.tets(i);
-            if (tet.color() == 1) {
-                kappa[i] = 11;
-                Ip[i] = 1;
-            } else {
-                kappa[i] = 3;
-                Ip[i] = 0;
-            }
-        }
-    }
-};
 
 struct DirectionSolver {
     const int procs, rank;
@@ -438,32 +381,20 @@ struct DirectionSolver {
     }
 };
 
-struct AverageSolution {
-    const int rank;
-    const mesh &m;
-    const MeshView &mv;
-    std::vector<double> U;
+void saveSolution(
+        const std::string &prefix, int rank,
+        const mesh &m, const MeshView &mv, const std::vector<double> &U)
+{
+    const auto &kappa = mv.kappa;
+    const auto &Ip    = mv.Ip;
 
-    AverageSolution(const int rank, const mesh &m, const MeshView &mv) : rank(rank), m(m), mv(mv), U(m.vertices().size(), 0.0)
-    { }
-
-    void add(const DirectionSolver &dir, const double wei) {
-        for (size_t i = 0; i < U.size(); i++)
-            U[i] += wei * dir.Idir[i];
-    }
-
-    void save(const std::string &prefix) {
-        const auto &kappa = mv.kappa;
-        const auto &Ip    = mv.Ip;
-
-        vtk_stream v((prefix + "_sol." + std::to_string(rank) + ".vtk").c_str());
-        v.write_header(m, "Solution");
-        v.append_cell_data(&kappa[0], "kappa");
-        v.append_cell_data(&Ip[0], "Ip");
-        v.append_point_data(&U[0], "U");
-        v.close();
-    }
-};
+    vtk_stream v((prefix + "_sol." + std::to_string(rank) + ".vtk").c_str());
+    v.write_header(m, "Solution");
+    v.append_cell_data(&kappa[0], "kappa");
+    v.append_cell_data(&Ip[0], "Ip");
+    v.append_point_data(&U[0], "U");
+    v.close();
+}
 
 int main(int argc, char **argv) {
     MPI::Init(argc, argv);
@@ -479,12 +410,13 @@ int main(int argc, char **argv) {
     std::fstream meshfile(std::string(argv[1]) + "." + std::to_string(rank) + ".m3d", std::ios::binary | std::ios::in);
     mesh m(meshfile);
     MeshView mv(m);
+    GPUMeshView gmv(mv);
+    GPUAverageSolution gas(mv);
 
     std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
 
     auto quad = LebedevQuadBank::lookupByOrder(10);
 
-    AverageSolution ave(rank, m, mv);
     const int roundSize = 2 * size;
     const int rounds = (quad.order + roundSize - 1) / roundSize;
 
@@ -530,15 +462,15 @@ int main(int argc, char **argv) {
 
         double mark3 = MPI::Wtime();
 
-        /* Move this to GPU */
+        /* Send boundary solution to GPU */
         for (int j = 0; j < activeDirections; j++)
             ds[j]->traceRest();
-
+/*
         for (int j = 0; j < activeDirections; j++) {
             int i = round * roundSize + j;
             ave.add(*ds[j], quad.w[i]);
         }
-
+*/
         double stop = MPI::Wtime();
 
         spent    += stop  - start;
@@ -555,7 +487,7 @@ int main(int argc, char **argv) {
     std::cout << "[" << rank << "]   SLAE    : " << (slae     * 1e3) << "ms" << std::endl;
     std::cout << "[" << rank << "]   TraceAll: " << (trace    * 1e3) << "ms" << std::endl;
 
-    ave.save(argv[1]);
+    saveSolution(argv[1], rank, m, mv, gas.retrieve());
 
     MPI::Finalize();
     return 0;
