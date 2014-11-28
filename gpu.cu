@@ -14,7 +14,9 @@
         << "' failed with error `" << cudaGetErrorString(__err) << std::endl; abort(); } \
 } while (false)
 
-GPUMeshView::GPUMeshView(MeshView &mv) {
+GPUMeshView::GPUMeshView(int device, MeshView &mv) {
+    cudaSetDevice(device);
+
     nP = mv.pts.size();
     int nT = mv.tets.size();
 
@@ -33,8 +35,12 @@ GPUMeshView::~GPUMeshView() {
     CUDA_CHECK(cudaFree(Ip));
 }
 
-GPUAverageSolution::GPUAverageSolution(const MeshView &mv) : nP(mv.pts.size()), U(nP) {
-    cublasInit();
+GPUAverageSolution::GPUAverageSolution(const GPUMeshView &gmv) : nP(gmv.nP), U(nP) {
+    cublasStatus status = cublasInit();
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        std::cerr << "CUBLAS init failed with status " << status << std::endl;
+        abort();
+    }
     CUDA_CHECK(cudaMalloc(&Udev, nP * sizeof(real)));
     CUDA_CHECK(cudaMemset(Udev, 0, nP * sizeof(real)));
 }
@@ -63,10 +69,15 @@ void GPUAverageSolution::add<double>(double *Idir, const double wei) {
     cublasDaxpy(nP, wei, Idir, 1, (double *)Udev, 1);
 }
 
-GPUMultipleDirectionSolver::GPUMultipleDirectionSolver(const int maxDirections, const GPUMeshView &mv)
+GPUMultipleDirectionSolver::GPUMultipleDirectionSolver(
+        const int maxDirections, const GPUMeshView &mv, const std::vector<point> &ws
+)
     : maxDirections(maxDirections), mv(mv)
 {
     CUDA_CHECK(cudaMalloc(&Idirs, mv.nP * maxDirections * sizeof(real)));
+    CUDA_CHECK(cudaMalloc(&inner, mv.nP * maxDirections * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&w, ws.size() * sizeof(point)));
+    CUDA_CHECK(cudaMemcpy(w, ws.data(), ws.size() * sizeof(point), cudaMemcpyHostToDevice));
 }
 
 real *GPUMultipleDirectionSolver::Idir(const int direction) {
@@ -74,6 +85,19 @@ real *GPUMultipleDirectionSolver::Idir(const int direction) {
     return Idirs + direction * mv.nP;
 }
 
+int *GPUMultipleDirectionSolver::innerFlag(const int direction) {
+    assert(direction < maxDirections);
+    return inner + direction * mv.nP;
+}
+
 GPUMultipleDirectionSolver::~GPUMultipleDirectionSolver() {
     CUDA_CHECK(cudaFree(Idirs));
+    CUDA_CHECK(cudaFree(w));
+}
+
+void GPUMultipleDirectionSolver::setBoundary(
+        const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner)
+{
+    CUDA_CHECK(cudaMemcpy(Idir(direction), Ihostdir.data(), mv.nP * sizeof(real), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(innerFlag(direction), isInner.data(), mv.nP * sizeof(int), cudaMemcpyHostToDevice));
 }

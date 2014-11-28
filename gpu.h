@@ -17,7 +17,7 @@ struct GPUMeshViewRaw {
 };
 
 struct GPUMeshView : public GPUMeshViewRaw {
-    GPUMeshView(MeshView &mv);
+    GPUMeshView(int device, MeshView &mv);
     ~GPUMeshView();
 };
 
@@ -26,7 +26,7 @@ struct GPUAverageSolution {
     std::vector<double> U;
     real *Udev;
 
-    GPUAverageSolution(const MeshView &mv);
+    GPUAverageSolution(const GPUMeshView &gmv);
     ~GPUAverageSolution();
 
     template<typename R>
@@ -39,9 +39,13 @@ struct GPUMultipleDirectionSolver {
     const int maxDirections;
     const GPUMeshView &mv;
     real *Idirs;
-    GPUMultipleDirectionSolver(const int maxDirections, const GPUMeshView &mv);
+    int *inner;
+    point *w;
+    GPUMultipleDirectionSolver(const int maxDirections, const GPUMeshView &mv, const std::vector<point> &ws);
     ~GPUMultipleDirectionSolver();
+    void setBoundary(const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner);
     real *Idir(const int direction);
+    int *innerFlag(const int direction);
 };
 
 #endif

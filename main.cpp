@@ -79,7 +79,7 @@ struct DirectionSolver {
     std::vector<VertTetQual> interface;
     std::vector<int> owner;
     std::unordered_map<idx, int> vertToVarMap;
-    std::vector<bool> isInner;
+    std::vector<int> isInner;
 
     std::vector<int> unknownSize;
     std::vector<int> unknownStarts;
@@ -323,14 +323,14 @@ struct DirectionSolver {
 
         int nP = m.vertices().size();
         Idir.assign(nP, 0);
-        isInner.assign(nP, true);
+        isInner.assign(nP, 1);
 
         for (auto it : vertToVarMap) {
             idx i = it.first;
             int j = it.second;
             if (j >= 0) {
                 Idir[i] = sol[j];
-                isInner[i] = false;
+                isInner[i] = 0;
             }
         }
     }
@@ -410,18 +410,24 @@ int main(int argc, char **argv) {
     std::fstream meshfile(std::string(argv[1]) + "." + std::to_string(rank) + ".m3d", std::ios::binary | std::ios::in);
     mesh m(meshfile);
     MeshView mv(m);
-    GPUMeshView gmv(mv);
-    GPUAverageSolution gas(mv);
+    GPUMeshView gmv(0, mv);
+    GPUAverageSolution gas(gmv);
 
     std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
 
-    auto quad = LebedevQuadBank::lookupByOrder(10);
+    LebedevQuad quad = LebedevQuadBank::lookupByOrder(10);
+
+    std::cout << "Using " << quad.order << " directions" << std::endl;
 
     const int roundSize = 2 * size;
     const int rounds = (quad.order + roundSize - 1) / roundSize;
 
+    std::vector<point> ws;
+    for (int i = 0; i < quad.order; i++)
+        ws.push_back(point(quad.x[i], quad.y[i], quad.z[i]));
+
     std::vector<std::unique_ptr<DirectionSolver> > ds(roundSize);
-    GPUMultipleDirectionSolver gmds(roundSize, gmv);
+    GPUMultipleDirectionSolver gmds(roundSize, gmv, ws);
 
     double spent = 0, prepare = 0, boundary = 0, slae = 0, trace = 0;
 
@@ -463,8 +469,12 @@ int main(int argc, char **argv) {
 
         double mark3 = MPI::Wtime();
 
-        /* Send boundary solution to GPU */
-/*        for (int j = 0; j < activeDirections; j++)
+        for (int j = 0; j < activeDirections; j++)
+            gmds.setBoundary(j, ds[j]->Idir, ds[j]->isInner);
+
+//        gmds.trace()
+/*
+        for (int j = 0; j < activeDirections; j++)
             ds[j]->traceRest();
 */
         for (int j = 0; j < activeDirections; j++) {
