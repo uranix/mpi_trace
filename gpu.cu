@@ -26,6 +26,12 @@ GPUMeshView::GPUMeshView(int device, MeshView &mv) {
     CUDA_CHECK(cudaMalloc(&tets,   nT * sizeof(tet)  ));
     CUDA_CHECK(cudaMalloc(&kappa,  nT * sizeof(real) ));
     CUDA_CHECK(cudaMalloc(&Ip,     nT * sizeof(real) ));
+
+    CUDA_CHECK(cudaMemcpy(pts,    mv.pts   .data(), nP * sizeof(point), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(anyTet, mv.anyTet.data(), nP * sizeof(int),   cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(tets,   mv.tets  .data(), nT * sizeof(tet),   cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(kappa,  mv.kappa .data(), nT * sizeof(real),  cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(Ip,     mv.Ip    .data(), nT * sizeof(real),  cudaMemcpyHostToDevice));
 }
 
 GPUMeshView::~GPUMeshView() {

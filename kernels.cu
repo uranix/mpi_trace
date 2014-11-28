@@ -15,10 +15,7 @@ __global__ void trace_kernel(const int nP, const int lo, GPUMeshViewRaw mv, real
     int vout[3];
     point pw;
 
-    int depth = 10;
-
-    while (depth) {
-        depth--;
+    while (true) {
         int face;
         tet currTet = mv.tets[itet];
         real len = trace(w, currTet, r, face, mv.pts);
@@ -31,9 +28,8 @@ __global__ void trace_kernel(const int nP, const int lo, GPUMeshViewRaw mv, real
             for (int j = 0; j < 3; j++)
                 vout[j] = currTet.p[(face + 1 + j) & 3];
             pw = bary(r, mv.pts[vout[0]], mv.pts[vout[1]], mv.pts[vout[2]]);
-            break;
+            Idir[i] = b + a * (pw.x * Idir[vout[0]] + pw.y * Idir[vout[1]] + pw.z * Idir[vout[2]]);
+            return;
         }
     }
-
-    Idir[i] = b + a * (pw.x * Idir[vout[0]] + pw.y * Idir[vout[1]] + pw.z * Idir[vout[2]]);
 }
