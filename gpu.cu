@@ -12,7 +12,7 @@
 
 #define CUDA_CHECK(x) do { cudaError_t __err = (x);\
     if (__err != cudaSuccess) { std::cerr << __FILE__ << ":" << __LINE__ << " CUDA call `" << #x \
-        << "' failed with error `" << cudaGetErrorString(__err) << std::endl; abort(); } \
+        << "' failed with error `" << cudaGetErrorString(__err) << "'" << std::endl; abort(); } \
 } while (false)
 
 GPUMeshView::GPUMeshView(int device, MeshView &mv) {
@@ -110,4 +110,5 @@ void GPUMultipleDirectionSolver::traceInterior(const int lo, const int ndir) {
     dim3 grid((nP + block.x - 1) / block.x, ndir);
 
     trace_kernel<<<grid, block>>>(nP, lo, mv, Idirs, inner, w);
+    CUDA_CHECK(cudaDeviceSynchronize());
 }

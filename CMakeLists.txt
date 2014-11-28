@@ -16,7 +16,7 @@ include_directories(${METIS_INCLUDE_DIR})
 include_directories(${UMFPACK_INCLUDES})
 
 list(APPEND CMAKE_CXX_FLAGS "-std=c++11 -Wall -g")
-list(APPEND CUDA_NVCC_FLAGS "-arch=sm_12 -use_fast_math -Xptxas -v")
+list(APPEND CUDA_NVCC_FLAGS "-arch=sm_12 -use_fast_math -Xptxas -v -g -G")
 set(CUDA_VERBOSE_BUILD ON)
 set(CUDA_PROPAGATE_HOST_FLAGS OFF) # Otherwise -std=c++11 will be passed to -Xcompiler
 set(CUDA_HOST_COMPILER g++)
