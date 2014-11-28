@@ -334,51 +334,6 @@ struct DirectionSolver {
             }
         }
     }
-
-    void traceRest() {
-        int nP = m.vertices().size();
-        point w(omega.x, omega.y, omega.z);
-
-        const auto &pts    = meshview.pts;
-        const auto &tets   = meshview.tets;
-        const auto &kappa  = meshview.kappa;
-        const auto &Ip     = meshview.Ip;
-        const auto &anyTet = meshview.anyTet;
-
-        for (int i = 0; i < nP; i++) {
-            if (!isInner[i])
-                continue;
-            int itet = anyTet[i];
-            point r(pts[i]);
-            real a = 1, b = 0;
-            int vout[3];
-            real wei[3];
-            while (true) {
-                int face;
-                real len = trace(w, tets[itet], r, face, &pts[0]);
-                real delta = len * kappa[itet];
-                real q = exp(-delta);
-                b += a * Ip[itet] * (1 - q);
-                a *= q;
-                const tet &old = tets[itet];
-                itet = old.neib[face];
-                if (itet == NO_TET) {
-                    vout[0] = old.p[(face + 1) & 3];
-                    vout[1] = old.p[(face + 2) & 3];
-                    vout[2] = old.p[(face + 3) & 3];
-                    point ws = bary(r, pts[vout[0]], pts[vout[1]], pts[vout[2]]);
-                    wei[0] = ws.x;
-                    wei[1] = ws.y;
-                    wei[2] = ws.z;
-                    break;
-                }
-            }
-
-            Idir[i] = b;
-            for (int k = 0; k < 3; k++)
-                Idir[i] += Idir[vout[k]] * a * wei[k];
-        }
-    }
 };
 
 void saveSolution(
