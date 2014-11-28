@@ -15,7 +15,7 @@ include_directories(${MPI_INCLUDE_PATH})
 include_directories(${METIS_INCLUDE_DIR})
 include_directories(${UMFPACK_INCLUDES})
 
-list(APPEND CMAKE_CXX_FLAGS "-std=c++11 -Wall")
+list(APPEND CMAKE_CXX_FLAGS "-std=c++11 -Wall -g")
 list(APPEND CUDA_NVCC_FLAGS "-arch=sm_12 -use_fast_math -Xptxas -v")
 set(CUDA_VERBOSE_BUILD ON)
 set(CUDA_PROPAGATE_HOST_FLAGS OFF) # Otherwise -std=c++11 will be passed to -Xcompiler
@@ -27,7 +27,7 @@ add_executable(mesh_prepare mesh_prepare.cpp)
 target_link_libraries(mesh_prepare mesh3d ${METIS_LIBRARY})
 
 add_executable(main main.cpp trace.cpp umfsolve.cpp LebedevQuad.cpp MeshView.cpp)
-target_link_libraries(main mesh3d kernels ${MPI_LIBRARIES} ${UMFPACK_LIBRARIES} ${CUDA_LIBRARIES})
+target_link_libraries(main mesh3d kernels ${MPI_LIBRARIES} ${UMFPACK_LIBRARIES} ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES})
 
 if (MPI_COMPILE_FLAGS)
 	set_target_properties(main PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")

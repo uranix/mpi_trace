@@ -87,7 +87,7 @@ struct DirectionSolver {
     MPI::Datatype SLAE_ROW_TYPE;
     std::vector<slae_row> slae;
     std::vector<double> sol;
-    std::vector<double> Idir;
+    std::vector<real> Idir;
 
     DirectionSolver(int size, int rank, const mesh &m, const MeshView &mv, const vector &omega)
     :
@@ -246,14 +246,14 @@ struct DirectionSolver {
             int itet = interface[j].tetIdx;
             int i = interface[j].vertIdx;
             point r(pts[i]);
-            double a = 1, b = 0;
+            real a = 1, b = 0;
             int vout[3];
-            double wei[3];
+            real wei[3];
             while (true) {
                 int face;
-                double len = trace(w, tets[itet], r, face, &pts[0]);
-                double delta = len * kappa[itet];
-                double q = exp(-delta);
+                real len = trace(w, tets[itet], r, face, &pts[0]);
+                real delta = len * kappa[itet];
+                real q = exp(-delta);
                 b += a * Ip[itet] * (1 - q);
                 a *= q;
                 const tet &old = tets[itet];
@@ -350,14 +350,14 @@ struct DirectionSolver {
                 continue;
             int itet = anyTet[i];
             point r(pts[i]);
-            double a = 1, b = 0;
+            real a = 1, b = 0;
             int vout[3];
-            double wei[3];
+            real wei[3];
             while (true) {
                 int face;
-                double len = trace(w, tets[itet], r, face, &pts[0]);
-                double delta = len * kappa[itet];
-                double q = exp(-delta);
+                real len = trace(w, tets[itet], r, face, &pts[0]);
+                real delta = len * kappa[itet];
+                real q = exp(-delta);
                 b += a * Ip[itet] * (1 - q);
                 a *= q;
                 const tet &old = tets[itet];
@@ -421,6 +421,7 @@ int main(int argc, char **argv) {
     const int rounds = (quad.order + roundSize - 1) / roundSize;
 
     std::vector<std::unique_ptr<DirectionSolver> > ds(roundSize);
+    GPUMultipleDirectionSolver gmds(roundSize, gmv);
 
     double spent = 0, prepare = 0, boundary = 0, slae = 0, trace = 0;
 
@@ -463,14 +464,14 @@ int main(int argc, char **argv) {
         double mark3 = MPI::Wtime();
 
         /* Send boundary solution to GPU */
-        for (int j = 0; j < activeDirections; j++)
+/*        for (int j = 0; j < activeDirections; j++)
             ds[j]->traceRest();
-/*
+*/
         for (int j = 0; j < activeDirections; j++) {
             int i = round * roundSize + j;
-            ave.add(*ds[j], quad.w[i]);
+            gas.add(gmds.Idir(j), static_cast<real>(quad.w[i]));
         }
-*/
+
         double stop = MPI::Wtime();
 
         spent    += stop  - start;
