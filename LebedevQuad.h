@@ -16,7 +16,7 @@ struct BankEntry {
 };
 
 struct LebedevQuad {
-	int order;
+    int order;
     int prec;
     std::vector<double> x;
     std::vector<double> y;
@@ -32,7 +32,7 @@ struct LebedevQuad {
         return sum;
     }
 
-	explicit LebedevQuad(const BankEntry &ent) {
+    explicit LebedevQuad(const BankEntry &ent) {
         order = ent.order;
         prec = ent.precision;
         x.resize(order);
@@ -54,17 +54,17 @@ struct LebedevQuadBank {
 private:
     const LebedevQuad _lookupByOrder(int order) {
         BankEntry needle(0, order, NULL);
-    	auto it = std::lower_bound(entries.begin(), entries.end(), needle,
-    		[](const BankEntry &a, const BankEntry &b) -> bool { return a.order < b.order; });
-		if (it == entries.end())
+        auto it = std::lower_bound(entries.begin(), entries.end(), needle,
+            [](const BankEntry &a, const BankEntry &b) -> bool { return a.order < b.order; });
+        if (it == entries.end())
             throw std::invalid_argument("Quadrature order is too big");
-		return LebedevQuad(*it);
+        return LebedevQuad(*it);
     }
     const LebedevQuad _lookupByPrecision(int prec) {
         BankEntry needle(prec, 0, NULL);
-		auto it = std::lower_bound(entries.begin(), entries.end(), needle,
-    		[](const BankEntry &a, const BankEntry &b) -> bool { return a.precision < b.precision; });
-		if (it == entries.end())
+        auto it = std::lower_bound(entries.begin(), entries.end(), needle,
+            [](const BankEntry &a, const BankEntry &b) -> bool { return a.precision < b.precision; });
+        if (it == entries.end())
             throw std::invalid_argument("Quadrature precision is too big");
         return LebedevQuad(*it);
     }

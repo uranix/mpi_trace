@@ -30,9 +30,9 @@ add_executable(main main.cpp umfsolve.cpp LebedevQuad.cpp MeshView.cpp)
 target_link_libraries(main mesh3d kernels ${MPI_LIBRARIES} ${UMFPACK_LIBRARIES} ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES})
 
 if (MPI_COMPILE_FLAGS)
-	set_target_properties(main PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
+    set_target_properties(main PROPERTIES COMPILE_FLAGS "${MPI_COMPILE_FLAGS}")
 endif()
 
 if (MPI_LINK_FLAGS)
-	set_target_properties(main PROPERTIES LINK_FLAGS "${MPI_LINK_FLAGS}")
+    set_target_properties(main PROPERTIES LINK_FLAGS "${MPI_LINK_FLAGS}")
 endif()
