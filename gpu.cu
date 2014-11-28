@@ -15,31 +15,28 @@
         << "' failed with error `" << cudaGetErrorString(__err) << "'" << std::endl; abort(); } \
 } while (false)
 
-GPUMeshView::GPUMeshView(int device, MeshView &mv) {
+GPUMeshView::GPUMeshView(int rank, int device, MeshView &mv) {
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
     cudaSetDevice(device);
+    std::cout << "Rank " << rank << " using device #" << device << " (" << prop.name << ")" << std::endl;
 
     nP = mv.pts.size();
-    int nT = mv.tets.size();
+    int nT = mv.elems.size();
 
     CUDA_CHECK(cudaMalloc(&pts,    nP * sizeof(point)));
-    CUDA_CHECK(cudaMalloc(&anyTet, nP * sizeof(int)  ));
-    CUDA_CHECK(cudaMalloc(&tets,   nT * sizeof(tet)  ));
-    CUDA_CHECK(cudaMalloc(&kappa,  nT * sizeof(real) ));
-    CUDA_CHECK(cudaMalloc(&Ip,     nT * sizeof(real) ));
+    CUDA_CHECK(cudaMalloc(&anyTet, nP * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&elems,  nT * sizeof(MeshElement)));
 
-    CUDA_CHECK(cudaMemcpy(pts,    mv.pts   .data(), nP * sizeof(point), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(anyTet, mv.anyTet.data(), nP * sizeof(int),   cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(tets,   mv.tets  .data(), nT * sizeof(tet),   cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(kappa,  mv.kappa .data(), nT * sizeof(real),  cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(Ip,     mv.Ip    .data(), nT * sizeof(real),  cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(pts,    mv.pts   .data(), nP * sizeof(point),       cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(anyTet, mv.anyTet.data(), nP * sizeof(int),         cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(elems,  mv.elems .data(), nT * sizeof(MeshElement), cudaMemcpyHostToDevice));
 }
 
 GPUMeshView::~GPUMeshView() {
     CUDA_CHECK(cudaFree(pts));
     CUDA_CHECK(cudaFree(anyTet));
-    CUDA_CHECK(cudaFree(tets));
-    CUDA_CHECK(cudaFree(kappa));
-    CUDA_CHECK(cudaFree(Ip));
+    CUDA_CHECK(cudaFree(elems));
 }
 
 GPUAverageSolution::GPUAverageSolution(const GPUMeshView &gmv) : nP(gmv.nP), U(nP) {
@@ -99,6 +96,7 @@ int *GPUMultipleDirectionSolver::innerFlag(const int direction) {
 
 GPUMultipleDirectionSolver::~GPUMultipleDirectionSolver() {
     CUDA_CHECK(cudaFree(Idirs));
+    CUDA_CHECK(cudaFree(inner));
     CUDA_CHECK(cudaFree(w));
 }
 
@@ -116,5 +114,4 @@ void GPUMultipleDirectionSolver::traceInterior(const int lo, const int ndir) {
     dim3 grid((nP + block.x - 1) / block.x, ndir);
 
     trace_kernel<<<grid, block>>>(nP, lo, mv, Idirs, inner, w);
-    CUDA_CHECK(cudaDeviceSynchronize());
 }

@@ -11,13 +11,11 @@ struct GPUMeshViewRaw {
     int nP;
     point *pts;
     int   *anyTet;
-    tet   *tets;
-    real  *kappa;
-    real  *Ip;
+    MeshElement *elems;
 };
 
 struct GPUMeshView : public GPUMeshViewRaw {
-    GPUMeshView(int device, MeshView &mv);
+    GPUMeshView(int rank, int device, MeshView &mv);
     ~GPUMeshView();
 };
 

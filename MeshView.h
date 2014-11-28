@@ -11,10 +11,8 @@ namespace mesh3d {
 
 struct MeshView {
     std::vector<point> pts;
-    std::vector<tet> tets;
-    std::vector<real> kappa;
-    std::vector<real> Ip;
     std::vector<int> anyTet;
+    std::vector<MeshElement> elems;
 
     MeshView(const mesh3d::mesh &);
 private:

@@ -17,11 +17,11 @@ __global__ void trace_kernel(const int nP, const int lo, GPUMeshViewRaw mv, real
 
     while (true) {
         int face;
-        tet currTet = mv.tets[itet];
+        MeshElement currTet = mv.elems[itet];
         real len = trace(w, currTet, r, face, mv.pts);
-        real delta = len * mv.kappa[itet];
+        real delta = len * currTet.kappa;
         real q = exp(-delta);
-        b += a * mv.Ip[itet] * (1 - q);
+        b += a * currTet.Ip * (1 - q);
         a *= q;
         itet = currTet.neib[face];
         if (itet == NO_TET) {

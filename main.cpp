@@ -236,9 +236,7 @@ struct DirectionSolver {
         slae.resize(unknownStarts.back());
 
         const auto &pts   = meshview.pts;
-        const auto &tets  = meshview.tets;
-        const auto &kappa = meshview.kappa;
-        const auto &Ip    = meshview.Ip;
+        const auto &elems  = meshview.elems;
 
         for (size_t j = 0; j < interface.size(); j++) {
             if (owner[j] != rank)
@@ -251,17 +249,17 @@ struct DirectionSolver {
             real wei[3];
             while (true) {
                 int face;
-                real len = trace(w, tets[itet], r, face, &pts[0]);
-                real delta = len * kappa[itet];
+                const MeshElement &currTet = elems[itet];
+                real len = trace(w, currTet, r, face, &pts[0]);
+                real delta = len * currTet.kappa;
                 real q = exp(-delta);
-                b += a * Ip[itet] * (1 - q);
+                b += a * currTet.Ip * (1 - q);
                 a *= q;
-                const tet &old = tets[itet];
-                itet = old.neib[face];
+                itet = currTet.neib[face];
                 if (itet == NO_TET) {
-                    vout[0] = old.p[(face + 1) & 3];
-                    vout[1] = old.p[(face + 2) & 3];
-                    vout[2] = old.p[(face + 3) & 3];
+                    vout[0] = currTet.p[(face + 1) & 3];
+                    vout[1] = currTet.p[(face + 2) & 3];
+                    vout[2] = currTet.p[(face + 3) & 3];
                     point ws = bary(r, pts[vout[0]], pts[vout[1]], pts[vout[2]]);
                     wei[0] = ws.x;
                     wei[1] = ws.y;
@@ -340,13 +338,8 @@ void saveSolution(
         const std::string &prefix, int rank,
         const mesh &m, const MeshView &mv, const std::vector<double> &U)
 {
-    const auto &kappa = mv.kappa;
-    const auto &Ip    = mv.Ip;
-
     vtk_stream v((prefix + "_sol." + std::to_string(rank) + ".vtk").c_str());
     v.write_header(m, "Solution");
-    v.append_cell_data(&kappa[0], "kappa");
-    v.append_cell_data(&Ip[0], "Ip");
     v.append_point_data(&U[0], "U");
     v.close();
 }
@@ -356,8 +349,8 @@ int main(int argc, char **argv) {
     int size = MPI::COMM_WORLD.Get_size();
     int rank = MPI::COMM_WORLD.Get_rank();
 
-    if (argc != 2) {
-        std::cerr << "USAGE: mpirun -np <np> " << argv[0] << " <prefix>" << std::endl;
+    if (argc != 3) {
+        std::cerr << "USAGE: mpirun -np <np> " << argv[0] << " <prefix> <ndir>" << std::endl;
         MPI::Finalize();
         return 1;
     }
@@ -365,12 +358,15 @@ int main(int argc, char **argv) {
     std::fstream meshfile(std::string(argv[1]) + "." + std::to_string(rank) + ".m3d", std::ios::binary | std::ios::in);
     mesh m(meshfile);
     MeshView mv(m);
-    GPUMeshView gmv(0, mv);
+
+    const int devmap[] = {2, 3, 4, 0, 2, 3, 4, 0};
+
+    GPUMeshView gmv(rank, devmap[rank], mv);
     GPUAverageSolution gas(gmv);
 
     std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
 
-    LebedevQuad quad = LebedevQuadBank::lookupByOrder(10);
+    LebedevQuad quad = LebedevQuadBank::lookupByOrder(atoi(argv[2]));
 
     if (!rank)
         std::cout << "Using " << quad.order << " directions" << std::endl;
