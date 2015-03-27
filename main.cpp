@@ -470,8 +470,8 @@ int main(int argc, char **argv) {
     int size = MPI::COMM_WORLD.Get_size();
     int rank = MPI::COMM_WORLD.Get_rank();
 
-    if (argc != 2) {
-        std::cerr << "USAGE: mpirun -np <np> " << argv[0] << " <prefix>" << std::endl;
+    if (argc != 3) {
+        std::cerr << "USAGE: mpirun -np <np> " << argv[0] << " <prefix> <ndir>" << std::endl;
         MPI::Finalize();
         return 1;
     }
@@ -482,7 +482,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
 
-    auto quad = LebedevQuadBank::lookupByOrder(10);
+    auto quad = LebedevQuadBank::lookupByOrder(atoi(argv[2]));
 
     AverageSolution ave(rank, m, mv);
     const int roundSize = 2 * size;
