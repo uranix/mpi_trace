@@ -424,7 +424,12 @@ int main(int argc, char **argv) {
         for (int j = 0; j < activeDirections; j++)
             gmds.setBoundary(j, ds[j]->Idir, ds[j]->isInner);
 
+#ifdef ALL_AT_ONCE
         gmds.traceInterior(round * roundSize, activeDirections);
+#else
+        for (int j = 0; j < activeDirections; j++)
+            gmds.traceInterior(round * roundSize + j, 1);
+#endif
 
         for (int j = 0; j < activeDirections; j++) {
             int i = round * roundSize + j;
