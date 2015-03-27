@@ -47,7 +47,7 @@ struct GPUMultipleDirectionSolver {
     int *innerFlag(const int direction);
 
     void setBoundary(const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner);
-    void traceInterior(const int startDirection, const int dirs);
+    void traceInterior(const int startDirection, const int offsDirection, const int dirs);
 };
 
 #endif

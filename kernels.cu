@@ -1,10 +1,10 @@
 #include "kernels.h"
 
-__global__ void trace_kernel(const int nP, const int lo, GPUMeshViewRaw mv, real *Idirs, int *inner, point *ws) {
-    int dir = lo + blockIdx.y;
+__global__ void trace_kernel(const int nP, const int lo, const int offs, GPUMeshViewRaw mv, real *Idirs, int *inner, point *ws) {
+    int dir = lo + offs + blockIdx.y;
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     const point w = ws[dir];
-    real *Idir = Idirs + blockIdx.y * nP;
+    real *Idir = Idirs + (offs + blockIdx.y) * nP;
 
     if (i >= nP || !inner[i])
         return;

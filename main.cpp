@@ -425,10 +425,10 @@ int main(int argc, char **argv) {
             gmds.setBoundary(j, ds[j]->Idir, ds[j]->isInner);
 
 #ifdef ALL_AT_ONCE
-        gmds.traceInterior(round * roundSize, activeDirections);
+        gmds.traceInterior(round * roundSize, 0, activeDirections);
 #else
         for (int j = 0; j < activeDirections; j++)
-            gmds.traceInterior(round * roundSize + j, 1);
+            gmds.traceInterior(round * roundSize, j, 1);
 #endif
 
         for (int j = 0; j < activeDirections; j++) {

@@ -107,11 +107,11 @@ void GPUMultipleDirectionSolver::setBoundary(
     CUDA_CHECK(cudaMemcpy(innerFlag(direction), isInner.data(), mv.nP * sizeof(int), cudaMemcpyHostToDevice));
 }
 
-void GPUMultipleDirectionSolver::traceInterior(const int lo, const int ndir) {
+void GPUMultipleDirectionSolver::traceInterior(const int lo, const int offs, const int ndir) {
     const int nP = mv.nP;
 
     dim3 block(256);
     dim3 grid((nP + block.x - 1) / block.x, ndir);
 
-    trace_kernel<<<grid, block>>>(nP, lo, mv, Idirs, inner, w);
+    trace_kernel<<<grid, block>>>(nP, lo, offs, mv, Idirs, inner, w);
 }
