@@ -17,8 +17,8 @@
 
 GPUMeshView::GPUMeshView(int rank, int device, MeshView &mv) {
     cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, device);
-    cudaSetDevice(device);
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    CUDA_CHECK(cudaSetDevice(device));
     std::cout << "Rank " << rank << " using device #" << device << " (" << prop.name << ")" << std::endl;
 
     nP = mv.pts.size();

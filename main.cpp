@@ -359,7 +359,7 @@ int main(int argc, char **argv) {
     mesh m(meshfile);
     MeshView mv(m);
 
-    const int devmap[] = {2, 3, 4, 0, 2, 3, 4, 0};
+    const int devmap[] = {0, 1, 2, 3, 4, 5, 6, 7};
 
     GPUMeshView gmv(rank, devmap[rank], mv);
     GPUAverageSolution gas(gmv);
