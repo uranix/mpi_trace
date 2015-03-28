@@ -27,8 +27,7 @@ struct GPUAverageSolution {
     GPUAverageSolution(const GPUMeshView &gmv);
     ~GPUAverageSolution();
 
-    template<typename R>
-    void add(R *Idir, const R wei);
+    void add(real *Idir, const real wei);
 
     std::vector<double> &retrieve();
 };
@@ -49,5 +48,7 @@ struct GPUMultipleDirectionSolver {
     void setBoundary(const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner);
     void traceInterior(const int startDirection, const int offsDirection, const int dirs);
 };
+
+bool alignment_test();
 
 #endif

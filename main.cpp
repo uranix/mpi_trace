@@ -244,17 +244,26 @@ struct DirectionSolver {
             int itet = interface[j].tetIdx;
             int i = interface[j].vertIdx;
             point r(pts[i]);
-            real a = 1, b = 0;
+            real a[NFREQ];
+            real b[NFREQ];
+
+            for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
+                a[ifreq] = 1;
+                b[ifreq] = 0;
+            }
+
             int vout[3];
             real wei[3];
             while (true) {
                 int face;
                 const MeshElement &currTet = elems[itet];
                 real len = trace(w, currTet, r, face, &pts[0]);
-                real delta = len * currTet.kappa;
-                real q = exp(-delta);
-                b += a * currTet.Ip * (1 - q);
-                a *= q;
+                for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
+                    real delta = len * currTet.kappa[ifreq];
+                    real q = exp(-delta);
+                    b[ifreq] += a[ifreq] * currTet.Ip[ifreq] * (1 - q);
+                    a[ifreq] *= q;
+                }
                 itet = currTet.neib[face];
                 if (itet == NO_TET) {
                     vout[0] = currTet.p[(face + 1) & 3];
@@ -273,9 +282,13 @@ struct DirectionSolver {
 
             int row = vertToVarMap[i];
 
-            slae[row].beta = b;
+            for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
+                slae[row].beta[ifreq] = b[ifreq];
+                slae[row].alpha[ifreq] = a[ifreq];
+            }
+            slae[row].w[0] = wei[0];
+            slae[row].w[1] = wei[1];
             for (int k = 0; k < 3; k++) {
-                slae[row].alpha[k] = wei[k] * a;
                 slae[row].cols[k] = vertToVarMap[vout[k]];
             }
         }
@@ -289,12 +302,12 @@ struct DirectionSolver {
             &unknownSize[0], &unknownStarts[0], SLAE_ROW_TYPE, root);
     }
     void solveSystem(int root) {
-        sol.resize(slae.size());
+        sol.resize(slae.size() * NFREQ);
         if (slae.size() == 0)
             return;
         if (root != rank)
             return;
-        std::cout << "[rank #" << rank << "] Solving system of " << slae.size() << " eqns for dir = " << omega << std::endl;
+        std::cout << "[rank #" << rank << "] Solving system of " << slae.size() << " x " << NFREQ << " eqns for dir = " << omega << std::endl;
         UmfSolveStatus status = umfsolve(slae, sol);
         if (status != OK) {
             std::cout << "UMFPack solver failed: ";
@@ -309,8 +322,7 @@ struct DirectionSolver {
         }
         double error = testSlaeSolution(slae, sol);
 
-        if (error > 1e-14)
-            std::cout << "Error norm : " << error << std::endl;
+        std::cout << "Error norm : " << error << std::endl;
     }
 
     /*
@@ -320,14 +332,15 @@ struct DirectionSolver {
         MPI::COMM_WORLD.Bcast(&sol[0], sol.size(), MPI::DOUBLE, root);
 
         int nP = m.vertices().size();
-        Idir.assign(nP, 0);
+        Idir.assign(nP * NFREQ, 0);
         isInner.assign(nP, 1);
 
         for (auto it : vertToVarMap) {
             idx i = it.first;
             int j = it.second;
             if (j >= 0) {
-                Idir[i] = sol[j];
+                for (int ifreq = 0; ifreq < NFREQ; ifreq++)
+                    Idir[i * NFREQ + ifreq] = sol[ifreq * NFREQ + j];
                 isInner[i] = 0;
             }
         }
@@ -340,7 +353,12 @@ void saveSolution(
 {
     vtk_stream v((prefix + "_sol." + std::to_string(rank) + ".vtk").c_str());
     v.write_header(m, "Solution");
-    v.append_point_data(&U[0], "U");
+    std::vector<float> Ufreq(U.size() / NFREQ);
+    for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
+        for (size_t i = 0; i < Ufreq.size(); i++)
+            Ufreq[i] = U[NFREQ * i + ifreq];
+        v.append_point_data(&U[0], "U" + std::to_string(ifreq));
+    }
     v.close();
 }
 
@@ -363,6 +381,16 @@ int main(int argc, char **argv) {
 
     GPUMeshView gmv(rank, devmap[rank], mv);
     GPUAverageSolution gas(gmv);
+
+    if (!rank) {
+        std::cout << "Running alignment test" << std::endl;
+        bool ret = alignment_test();
+        if (!ret) {
+            std::cout << "Test failed, aborting" << std::endl;
+            MPI::COMM_WORLD.Abort(0);
+        }
+        std::cout << "Test passed" << std::endl;
+    }
 
     std::cout << "Mesh for domain " << rank << " loaded" << std::endl;
 

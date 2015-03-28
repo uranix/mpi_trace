@@ -9,18 +9,10 @@
 
 #include <cmath>
 
-typedef float real;
+#include "config.h"
 
 const int NO_TET = -1;
 const real MIN_BARY = 1e-5;
-
-struct MeshElement {
-    int   p[4];
-    int   neib[4];
-    real  kappa;
-    real  Ip;
-    int   alignment[6];
-};
 
 struct point {
     real x, y, z;
@@ -90,7 +82,7 @@ UNIAPI inline point bary(const point &rs, const point &r1, const point &r2, cons
     real s1 = dot(S1, S);
     real s2 = dot(S2, S);
     real s3 = dot(S3, S);
-    real s = dot(S, S);
+    real s = s1 + s2 + s3;
     return point(s1 / s, s2 / s, s3 / s);
 }
 
@@ -123,12 +115,10 @@ UNIAPI inline coord trace_face(const point &w, const point &r0, const point &r1,
 
 UNIAPI inline real trace(const point &w, const MeshElement &t, point &r0, int &face, const point *pts) {
     coord b[4];
-    point p[8];
+    point p[4];
 
-    for (int j = 0; j < 4; j++) {
+    for (int j = 0; j < 4; j++)
         p[j] = pts[t.p[j]];
-        p[j + 4] = p[j];
-    }
 
     point4 input = bary4(r0, p);
     real eps = MIN_BARY;
@@ -151,10 +141,11 @@ UNIAPI inline real trace(const point &w, const MeshElement &t, point &r0, int &f
     r0 = input.x * p[0] + input.y * p[1] + input.z * p[2] + input.w * p[3];
 
     for (int j = 0; j < 4; j++)
-        b[j] = trace_face(w, r0, p[j + 1], p[j + 2], p[j + 3]);
+        b[j] = trace_face(w, r0, p[(j + 1) & 3], p[(j + 2) & 3], p[(j + 3) & 3]);
 
     int minj = -1;
     real len = -1;
+
     for (int j = 0; j < 4; j++) {
         if (b[j].abs() < (1 + MIN_BARY) && b[j].len > len) {
             minj = j;
@@ -165,7 +156,7 @@ UNIAPI inline real trace(const point &w, const MeshElement &t, point &r0, int &f
 
     coord out(b[minj]);
 
-    r0 = out.w1 * p[face + 1] + out.w2 * p[face + 2] + out.w3 * p[face + 3];
+    r0 = out.w1 * p[(face + 1) & 3] + out.w2 * p[(face + 2) & 3] + out.w3 * p[(face + 3) & 3];
     return out.len;
 }
 

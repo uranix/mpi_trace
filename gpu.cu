@@ -15,6 +15,14 @@
         << "' failed with error `" << cudaGetErrorString(__err) << "'" << std::endl; abort(); } \
 } while (false)
 
+void CUBLASWINAPI cublasXaxpy(int n, float alpha, const float *x, int incx, float *y, int incy) {
+    return cublasSaxpy(n, alpha, x, incx, y, incy);
+}
+
+void CUBLASWINAPI cublasXaxpy(int n, double alpha, const double *x, int incx, double *y, int incy) {
+    return cublasDaxpy(n, alpha, x, incx, y, incy);
+}
+
 GPUMeshView::GPUMeshView(int rank, int device, MeshView &mv) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
@@ -39,14 +47,14 @@ GPUMeshView::~GPUMeshView() {
     CUDA_CHECK(cudaFree(elems));
 }
 
-GPUAverageSolution::GPUAverageSolution(const GPUMeshView &gmv) : nP(gmv.nP), U(nP) {
+GPUAverageSolution::GPUAverageSolution(const GPUMeshView &gmv) : nP(gmv.nP), U(nP * NFREQ) {
     cublasStatus status = cublasInit();
     if (status != CUBLAS_STATUS_SUCCESS) {
         std::cerr << "CUBLAS init failed with status " << status << std::endl;
         abort();
     }
-    CUDA_CHECK(cudaMalloc(&Udev, nP * sizeof(real)));
-    CUDA_CHECK(cudaMemset(Udev, 0, nP * sizeof(real)));
+    CUDA_CHECK(cudaMalloc(&Udev, nP * NFREQ * sizeof(real)));
+    CUDA_CHECK(cudaMemset(Udev, 0, nP * NFREQ * sizeof(real)));
 }
 
 GPUAverageSolution::~GPUAverageSolution() {
@@ -55,22 +63,14 @@ GPUAverageSolution::~GPUAverageSolution() {
 }
 
 std::vector<double> &GPUAverageSolution::retrieve() {
-    std::vector<real> Uhost(nP);
-    CUDA_CHECK(cudaMemcpy(Uhost.data(), Udev, nP * sizeof(real), cudaMemcpyDeviceToHost));
+    std::vector<real> Uhost(nP * NFREQ);
+    CUDA_CHECK(cudaMemcpy(Uhost.data(), Udev, nP * NFREQ * sizeof(real), cudaMemcpyDeviceToHost));
     std::copy(Uhost.begin(), Uhost.end(), U.begin());
     return U;
 }
 
-template<>
-void GPUAverageSolution::add<float>(float *Idir, const float wei) {
-    assert(sizeof(real) == sizeof(float));
-    cublasSaxpy(nP, wei, Idir, 1, (float *)Udev, 1);
-}
-
-template<>
-void GPUAverageSolution::add<double>(double *Idir, const double wei) {
-    assert(sizeof(real) == sizeof(double));
-    cublasDaxpy(nP, wei, Idir, 1, (double *)Udev, 1);
+void GPUAverageSolution::add(float *Idir, const float wei) {
+    cublasXaxpy(nP * NFREQ, wei, Idir, 1, Udev, 1);
 }
 
 GPUMultipleDirectionSolver::GPUMultipleDirectionSolver(
@@ -78,7 +78,7 @@ GPUMultipleDirectionSolver::GPUMultipleDirectionSolver(
 )
     : maxDirections(maxDirections), mv(mv)
 {
-    CUDA_CHECK(cudaMalloc(&Idirs, mv.nP * maxDirections * sizeof(real)));
+    CUDA_CHECK(cudaMalloc(&Idirs, mv.nP * NFREQ * maxDirections * sizeof(real)));
     CUDA_CHECK(cudaMalloc(&inner, mv.nP * maxDirections * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&w, ws.size() * sizeof(point)));
     CUDA_CHECK(cudaMemcpy(w, ws.data(), ws.size() * sizeof(point), cudaMemcpyHostToDevice));
@@ -86,7 +86,7 @@ GPUMultipleDirectionSolver::GPUMultipleDirectionSolver(
 
 real *GPUMultipleDirectionSolver::Idir(const int direction) {
     assert(direction < maxDirections);
-    return Idirs + direction * mv.nP;
+    return Idirs + direction * mv.nP * NFREQ;
 }
 
 int *GPUMultipleDirectionSolver::innerFlag(const int direction) {
@@ -103,15 +103,15 @@ GPUMultipleDirectionSolver::~GPUMultipleDirectionSolver() {
 void GPUMultipleDirectionSolver::setBoundary(
         const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner)
 {
-    CUDA_CHECK(cudaMemcpy(Idir(direction), Ihostdir.data(), mv.nP * sizeof(real), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(Idir(direction), Ihostdir.data(), mv.nP * NFREQ * sizeof(real), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(innerFlag(direction), isInner.data(), mv.nP * sizeof(int), cudaMemcpyHostToDevice));
 }
 
 void GPUMultipleDirectionSolver::traceInterior(const int lo, const int offs, const int ndir) {
     const int nP = mv.nP;
 
-    dim3 block(256);
-    dim3 grid((nP + block.x - 1) / block.x, ndir);
+    dim3 block(NFREQ, PTSPERBLOCK);
+    dim3 grid((nP + PTSPERBLOCK - 1) / PTSPERBLOCK, ndir);
 
     trace_kernel<<<grid, block>>>(nP, lo, offs, mv, Idirs, inner, w);
 }

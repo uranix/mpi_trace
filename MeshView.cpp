@@ -45,11 +45,15 @@ void MeshView::setParams(const mesh &m) {
     for (int i = 0; i < nT; i++) {
         const tetrahedron &tet = m.tets(i);
         if (tet.color() == 1) {
-            elems[i].kappa = 11;
-            elems[i].Ip = 1;
+            for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
+                elems[i].kappa[ifreq] = ifreq;
+                elems[i].Ip[ifreq] = 1;
+            }
         } else {
-            elems[i].kappa = 3;
-            elems[i].Ip = 0;
+            for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
+                elems[i].kappa[ifreq] = 1;
+                elems[i].Ip[ifreq] = 1. / ifreq;
+            }
         }
     }
 }

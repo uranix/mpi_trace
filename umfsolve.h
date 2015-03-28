@@ -1,11 +1,14 @@
 #ifndef __UMFSOLVE_H__
 #define __UMFSOLVE_H__
 
+#include "config.h"
+
 const static int BC_VAR = -1;
 
 struct slae_row {
-    double beta;
-    double alpha[3];
+    real beta[NFREQ];
+    real alpha[NFREQ];
+    real w[2]; /* w[2] = 1 - w[0] - w[1] */
     int cols[3];
 };
 

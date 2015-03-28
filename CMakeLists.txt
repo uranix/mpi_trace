@@ -21,7 +21,7 @@ set(CUDA_VERBOSE_BUILD ON)
 set(CUDA_PROPAGATE_HOST_FLAGS OFF) # Otherwise -std=c++11 will be passed to -Xcompiler
 set(CUDA_HOST_COMPILER g++)
 
-cuda_add_library(kernels STATIC gpu.cu kernels.cu)
+cuda_add_library(kernels STATIC gpu.cu kernels.cu aligntest.cu)
 
 add_executable(mesh_prepare mesh_prepare.cpp)
 target_link_libraries(mesh_prepare mesh3d ${METIS_LIBRARY})
