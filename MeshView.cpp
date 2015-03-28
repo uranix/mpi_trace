@@ -52,7 +52,7 @@ void MeshView::setParams(const mesh &m) {
         } else {
             for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
                 elems[i].kappa[ifreq] = 1;
-                elems[i].Ip[ifreq] = 1. / ifreq;
+                elems[i].Ip[ifreq] = 1. / (1 + ifreq);
             }
         }
     }

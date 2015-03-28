@@ -6,9 +6,9 @@
 const static int BC_VAR = -1;
 
 struct slae_row {
-    real beta[NFREQ];
-    real alpha[NFREQ];
-    real w[2]; /* w[2] = 1 - w[0] - w[1] */
+    double beta[NFREQ];
+    double alpha[NFREQ];
+    double w[2]; /* w[2] = 1 - w[0] - w[1] */
     int cols[3];
 };
 

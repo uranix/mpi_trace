@@ -16,6 +16,8 @@
 #include <unordered_map>
 #include <memory>
 
+#include <fenv.h>
+
 const int OUTER_DOMAIN = -1;
 
 using namespace mesh3d;
@@ -100,8 +102,8 @@ struct DirectionSolver {
         }
         int count = 2;
         MPI::Datatype oldtypes[2] = {MPI::DOUBLE, MPI::INT};
-        int blockcounts[2] = {4, 3};
-        MPI::Aint offsets[2] = {0, 4 * sizeof(double)};
+        int blockcounts[2] = {2 + 2 * NFREQ, 3};
+        MPI::Aint offsets[2] = {0, (2 + 2 * NFREQ) * sizeof(double)};
         SLAE_ROW_TYPE = MPI::Datatype::Create_struct(count, blockcounts, offsets, oldtypes);
         SLAE_ROW_TYPE.Commit();
     }
@@ -302,7 +304,7 @@ struct DirectionSolver {
             &unknownSize[0], &unknownStarts[0], SLAE_ROW_TYPE, root);
     }
     void solveSystem(int root) {
-        sol.resize(slae.size() * NFREQ);
+        sol.assign(slae.size() * NFREQ, 0);
         if (slae.size() == 0)
             return;
         if (root != rank)
@@ -331,8 +333,9 @@ struct DirectionSolver {
     void bcastSolution(int root) {
         MPI::COMM_WORLD.Bcast(&sol[0], sol.size(), MPI::DOUBLE, root);
 
+        size_t M = sol.size() / NFREQ;
         int nP = m.vertices().size();
-        Idir.assign(nP * NFREQ, 0);
+        Idir.assign(nP * NFREQ, -1);
         isInner.assign(nP, 1);
 
         for (auto it : vertToVarMap) {
@@ -340,7 +343,7 @@ struct DirectionSolver {
             int j = it.second;
             if (j >= 0) {
                 for (int ifreq = 0; ifreq < NFREQ; ifreq++)
-                    Idir[i * NFREQ + ifreq] = sol[ifreq * NFREQ + j];
+                    Idir[i * NFREQ + ifreq] = sol[ifreq * M + j];
                 isInner[i] = 0;
             }
         }
@@ -349,20 +352,21 @@ struct DirectionSolver {
 
 void saveSolution(
         const std::string &prefix, int rank,
-        const mesh &m, const MeshView &mv, const std::vector<double> &U)
+        const mesh &m, const MeshView &mv, const std::vector<real> &U)
 {
     vtk_stream v((prefix + "_sol." + std::to_string(rank) + ".vtk").c_str());
     v.write_header(m, "Solution");
-    std::vector<float> Ufreq(U.size() / NFREQ);
+    std::vector<real> Ufreq(U.size() / NFREQ);
     for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
         for (size_t i = 0; i < Ufreq.size(); i++)
             Ufreq[i] = U[NFREQ * i + ifreq];
-        v.append_point_data(&U[0], "U" + std::to_string(ifreq));
+        v.append_point_data(Ufreq.data(), "U" + std::to_string(ifreq));
     }
     v.close();
 }
 
 int main(int argc, char **argv) {
+    feenableexcept(FE_INVALID | FE_OVERFLOW | FE_DIVBYZERO);
     MPI::Init(argc, argv);
     int size = MPI::COMM_WORLD.Get_size();
     int rank = MPI::COMM_WORLD.Get_rank();

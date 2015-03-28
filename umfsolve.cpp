@@ -70,7 +70,7 @@ double testSlaeSolution(const std::vector<slae_row> &slae, std::vector<double> &
     double norm = 0;
     for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
         for (size_t i = 0; i < m; i++) {
-            double res = sol[i] - slae[i].beta[ifreq];
+            double res = sol[ifreq * m + i] - slae[i].beta[ifreq];
             for (int j = 0; j < 3; j++) {
                 int col = slae[i].cols[j];
                 double w;

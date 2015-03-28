@@ -21,7 +21,7 @@ struct GPUMeshView : public GPUMeshViewRaw {
 
 struct GPUAverageSolution {
     int nP;
-    std::vector<double> U;
+    std::vector<real> U;
     real *Udev;
 
     GPUAverageSolution(const GPUMeshView &gmv);
@@ -29,7 +29,7 @@ struct GPUAverageSolution {
 
     void add(real *Idir, const real wei);
 
-    std::vector<double> &retrieve();
+    const std::vector<real> &retrieve();
 };
 
 struct GPUMultipleDirectionSolver {

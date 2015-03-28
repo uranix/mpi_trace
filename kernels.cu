@@ -1,18 +1,20 @@
 #include "kernels.h"
 
+#include <cstdio>
+
 __device__ void fetch(MeshElement *dst, const MeshElement *src) {
     /* We have NFREQ threads
      * sizeof(MeshElement) = K * NFREQ * sizeof(real)
      */
     int i = threadIdx.x;
-    const int K = sizeof(MeshElement) / NFREQ / sizeof(real);
-
+/*    const int K = sizeof(MeshElement) / NFREQ / sizeof(real);
     const real *_src = reinterpret_cast<const real *>(src);
     real *_dst = reinterpret_cast<real *>(dst);
     #pragma unroll
     for (int k = 0; k < K; k++)
-        _dst[k * NFREQ + i] = _src[k * NFREQ + i];
-    __syncthreads();
+        _dst[k * NFREQ + i] = _src[k * NFREQ + i]; */
+    if (!i)
+        *dst = *src;
 }
 
 /*
@@ -30,37 +32,44 @@ __global__ void trace_kernel(const int nP, const int lo, const int offs, GPUMesh
     const point w = ws[dir];
     real *Idir = Idirs + (offs + blockIdx.y) * nP * NFREQ;
 
-    if (i >= nP || !inner[i])
-        return;
+    bool idle = (i >= nP || !inner[i]);
 
-    int itet = mv.anyTet[i];
-    point r(mv.pts[i]);
+    int itet = idle ? -1 : mv.anyTet[i];
+    point pw;
+    point r(idle ? pw : mv.pts[i]);
     real a = 1, b = 0;
     int vout[3];
-    point pw;
 
-    while (true) {
+    do {
         int face;
-        fetch(currTets + blockPoint, mv.elems + itet);
-        const MeshElement &currTet = currTets[blockPoint];
+        if (!idle)
+            fetch(currTets + blockPoint, mv.elems + itet);
+        __syncthreads();
+        if (!idle) {
+            const MeshElement &currTet = currTets[blockPoint];
 
-        real len = trace(w, currTet, r, face, mv.pts);
+            real len = trace(w, currTet, r, face, mv.pts);
 
-        real delta = len * currTet.kappa[ifreq];
-        real q = exp(-delta);
-        b += a * currTet.Ip[ifreq] * (1 - q);
-        a *= q;
-        itet = currTet.neib[face];
-        if (itet == NO_TET) {
-            for (int j = 0; j < 3; j++)
-                vout[j] = currTet.p[(face + 1 + j) & 3];
-            pw = bary(r, mv.pts[vout[0]], mv.pts[vout[1]], mv.pts[vout[2]]);
-            Idir[i * NFREQ + ifreq] = b + a * (
-                    pw.x * Idir[vout[0] * NFREQ + ifreq] +
-                    pw.y * Idir[vout[1] * NFREQ + ifreq] +
-                    pw.z * Idir[vout[2] * NFREQ + ifreq]
-                );
-            return;
+            real delta = len * currTet.kappa[ifreq];
+            real q = exp(-delta);
+            b += a * currTet.Ip[ifreq] * (1 - q);
+            a *= q;
+            itet = currTet.neib[face];
+            if (itet == NO_TET) {
+                for (int j = 0; j < 3; j++)
+                    vout[j] = currTet.p[(face + 1 + j) & 3];
+                pw = bary(r, mv.pts[vout[0]], mv.pts[vout[1]], mv.pts[vout[2]]);
+                real I0 = Idir[vout[0] * NFREQ + ifreq];
+                real I1 = Idir[vout[1] * NFREQ + ifreq];
+                real I2 = Idir[vout[2] * NFREQ + ifreq];
+                real out = b + a * (
+                        pw.x * I0 +
+                        pw.y * I1 +
+                        pw.z * I2
+                    );
+                Idir[i * NFREQ + ifreq] = out;
+                idle = true;
+            }
         }
-    }
+    } while (!__syncthreads_and(idle));
 }

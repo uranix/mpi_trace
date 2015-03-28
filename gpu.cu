@@ -62,14 +62,12 @@ GPUAverageSolution::~GPUAverageSolution() {
     cublasShutdown();
 }
 
-std::vector<double> &GPUAverageSolution::retrieve() {
-    std::vector<real> Uhost(nP * NFREQ);
-    CUDA_CHECK(cudaMemcpy(Uhost.data(), Udev, nP * NFREQ * sizeof(real), cudaMemcpyDeviceToHost));
-    std::copy(Uhost.begin(), Uhost.end(), U.begin());
+const std::vector<real> &GPUAverageSolution::retrieve() {
+    CUDA_CHECK(cudaMemcpy(U.data(), Udev, nP * NFREQ * sizeof(real), cudaMemcpyDeviceToHost));
     return U;
 }
 
-void GPUAverageSolution::add(float *Idir, const float wei) {
+void GPUAverageSolution::add(real *Idir, const real wei) {
     cublasXaxpy(nP * NFREQ, wei, Idir, 1, Udev, 1);
 }
 
