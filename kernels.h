@@ -4,6 +4,6 @@
 #include "trace.h"
 #include "gpu.h"
 
-__global__ void trace_kernel(const int nP, const int lo, const int offs, GPUMeshViewRaw mv, real *Idirs, int *inner, point *ws);
+__global__ void trace_kernel(const int pointLo, const int nP, const int dirLo, const int dirOffs, GPUMeshViewRaw mv, real *Idirs, int *inner, point *ws);
 
 #endif

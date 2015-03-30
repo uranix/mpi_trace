@@ -19,16 +19,16 @@ __device__ void fetch(MeshElement *dst, const MeshElement *src) {
     dim3 block(NFREQ, PTSPERBLOCK);
     dim3 grid((nP + PTSPERBLOCK - 1) / PTSPERBLOCK, ndir);
  */
-__global__ void trace_kernel(const int nP, const int lo, const int offs, GPUMeshViewRaw mv, real *Idirs, int *inner, point *ws) {
+__global__ void trace_kernel(const int pointLo, const int nP, const int dirLo, const int dirOffs, GPUMeshViewRaw mv, real *Idirs, int *inner, point *ws) {
     __shared__ MeshElement currTets[PTSPERBLOCK];
 
-    int dir = lo + offs + blockIdx.y;
+    int dir = dirLo + dirOffs + blockIdx.y;
     int ifreq = threadIdx.x;
     int blockPoint = threadIdx.y;
-    int i = blockPoint + blockIdx.x * PTSPERBLOCK;
+    int i = pointLo + blockPoint + blockIdx.x * PTSPERBLOCK;
 
     const point w = ws[dir];
-    real *Idir = Idirs + (offs + blockIdx.y) * nP * NFREQ;
+    real *Idir = Idirs + (dirOffs + blockIdx.y) * nP * NFREQ;
 
     bool idle = i >= nP || !inner[i];
 

@@ -107,9 +107,15 @@ void GPUMultipleDirectionSolver::setBoundary(
 
 void GPUMultipleDirectionSolver::traceInterior(const int lo, const int offs, const int ndir) {
     const int nP = mv.nP;
+    const int nPmax = 16 * PTSPERBLOCK;
 
     dim3 block(NFREQ, PTSPERBLOCK);
-    dim3 grid((nP + PTSPERBLOCK - 1) / PTSPERBLOCK, ndir);
+    for (int pointLo = 0; pointLo < nP; pointLo += nPmax) {
+        int nPlaunch = nPmax;
+        if (pointLo + nPlaunch > nP)
+            nPlaunch = nP - pointLo;
 
-    trace_kernel<<<grid, block>>>(nP, lo, offs, mv, Idirs, inner, w);
+        dim3 grid((nPlaunch + PTSPERBLOCK - 1) / PTSPERBLOCK, ndir);
+        trace_kernel<<<grid, block>>>(pointLo, nP, lo, offs, mv, Idirs, inner, w);
+    }
 }
