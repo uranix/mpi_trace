@@ -58,6 +58,7 @@ bool alignment_test() {
     test_host(host_as);
     AlignStats *gpu_as_dev;
     cudaMalloc(&gpu_as_dev, sizeof(AlignStats));
+    cudaMemset(&gpu_as_dev, -1, sizeof(AlignStats));
     test_gpu<<<1, 1>>>(gpu_as_dev);
     cudaMemcpy(&gpu_as, gpu_as_dev, sizeof(AlignStats), cudaMemcpyDeviceToHost);
 

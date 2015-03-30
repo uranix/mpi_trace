@@ -304,9 +304,9 @@ struct DirectionSolver {
             &unknownSize[0], &unknownStarts[0], SLAE_ROW_TYPE, root);
     }
     void solveSystem(int root) {
-        sol.assign(slae.size() * NFREQ, 0);
         if (slae.size() == 0)
             return;
+        sol.assign(slae.size() * NFREQ, 0);
         if (root != rank)
             return;
         std::cout << "[rank #" << rank << "] Solving system of " << slae.size() << " x " << NFREQ << " eqns for dir = " << omega << std::endl;
@@ -331,11 +331,12 @@ struct DirectionSolver {
      * Bcast sol vector from rank root
      * */
     void bcastSolution(int root) {
-        MPI::COMM_WORLD.Bcast(&sol[0], sol.size(), MPI::DOUBLE, root);
+        if (sol.size())
+            MPI::COMM_WORLD.Bcast(&sol[0], sol.size(), MPI::DOUBLE, root);
 
         size_t M = sol.size() / NFREQ;
         int nP = m.vertices().size();
-        Idir.assign(nP * NFREQ, -1);
+        Idir.resize(nP * NFREQ, -1e10);
         isInner.assign(nP, 1);
 
         for (auto it : vertToVarMap) {
@@ -345,6 +346,9 @@ struct DirectionSolver {
                 for (int ifreq = 0; ifreq < NFREQ; ifreq++)
                     Idir[i * NFREQ + ifreq] = sol[ifreq * M + j];
                 isInner[i] = 0;
+            } else {
+                for (int ifreq = 0; ifreq < NFREQ; ifreq++)
+                    Idir[i * NFREQ + ifreq] = 0;
             }
         }
     }

@@ -46,13 +46,13 @@ void MeshView::setParams(const mesh &m) {
         const tetrahedron &tet = m.tets(i);
         if (tet.color() == 1) {
             for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
-                elems[i].kappa[ifreq] = ifreq;
+                elems[i].kappa[ifreq] = pow(1 + ifreq, 2);
                 elems[i].Ip[ifreq] = 1;
             }
         } else {
             for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
-                elems[i].kappa[ifreq] = 1;
-                elems[i].Ip[ifreq] = 1. / (1 + ifreq);
+                elems[i].kappa[ifreq] = 1 / (1. + ifreq);
+                elems[i].Ip[ifreq] = 0;
             }
         }
     }

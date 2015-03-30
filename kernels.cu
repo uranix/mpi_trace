@@ -7,14 +7,12 @@ __device__ void fetch(MeshElement *dst, const MeshElement *src) {
      * sizeof(MeshElement) = K * NFREQ * sizeof(real)
      */
     int i = threadIdx.x;
-/*    const int K = sizeof(MeshElement) / NFREQ / sizeof(real);
+    const int K = sizeof(MeshElement) / NFREQ / sizeof(real);
     const real *_src = reinterpret_cast<const real *>(src);
     real *_dst = reinterpret_cast<real *>(dst);
     #pragma unroll
     for (int k = 0; k < K; k++)
-        _dst[k * NFREQ + i] = _src[k * NFREQ + i]; */
-    if (!i)
-        *dst = *src;
+        _dst[k * NFREQ + i] = _src[k * NFREQ + i];
 }
 
 /*
@@ -27,16 +25,16 @@ __global__ void trace_kernel(const int nP, const int lo, const int offs, GPUMesh
     int dir = lo + offs + blockIdx.y;
     int ifreq = threadIdx.x;
     int blockPoint = threadIdx.y;
-    int i = blockPoint + blockIdx.x * blockDim.x;
+    int i = blockPoint + blockIdx.x * PTSPERBLOCK;
 
     const point w = ws[dir];
     real *Idir = Idirs + (offs + blockIdx.y) * nP * NFREQ;
 
-    bool idle = (i >= nP || !inner[i]);
+    bool idle = i >= nP || !inner[i];
 
     int itet = idle ? -1 : mv.anyTet[i];
     point pw;
-    point r(idle ? pw : mv.pts[i]);
+    point r(idle ? point() : mv.pts[i]);
     real a = 1, b = 0;
     int vout[3];
 
