@@ -119,3 +119,7 @@ void GPUMultipleDirectionSolver::traceInterior(const int lo, const int offs, con
         trace_kernel<<<grid, block>>>(pointLo, nP, lo, offs, mv, Idirs, inner, w);
     }
 }
+
+void GPUMultipleDirectionSolver::sync() {
+    CUDA_CHECK(cudaDeviceSynchronize());
+}

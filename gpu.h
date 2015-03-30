@@ -47,6 +47,7 @@ struct GPUMultipleDirectionSolver {
 
     void setBoundary(const int direction, std::vector<real> &Ihostdir, std::vector<int> &isInner);
     void traceInterior(const int startDirection, const int offsDirection, const int dirs);
+    void sync();
 };
 
 bool alignment_test();

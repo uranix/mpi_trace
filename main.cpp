@@ -472,6 +472,9 @@ int main(int argc, char **argv) {
             gas.add(gmds.Idir(j), static_cast<real>(quad.w[i]));
         }
 
+        if (round == rounds - 1)
+            gmds.sync();
+
         double stop = MPI::Wtime();
 
         spent    += stop  - start;
