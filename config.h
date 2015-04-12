@@ -24,6 +24,6 @@ struct MeshElement {
  * CUDA block size is NFREQ x PTSPERBLOCK
  * Keep block size around 1024
  * */
-#define PTSPERBLOCK (256)
+#define PTSPERBLOCK (1024 / NFREQ)
 
 #endif
