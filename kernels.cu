@@ -2,26 +2,11 @@
 
 #include <cstdio>
 
-__device__ void fetch(MeshElement *dst, const MeshElement *src) {
-    /* We have NFREQ threads
-     * sizeof(MeshElement) = K * NFREQ * sizeof(real)
-     */
-    int i = threadIdx.x;
-    const int K = sizeof(MeshElement) / NFREQ / sizeof(real);
-    const real *_src = reinterpret_cast<const real *>(src);
-    real *_dst = reinterpret_cast<real *>(dst);
-    #pragma unroll
-    for (int k = 0; k < K; k++)
-        _dst[k * NFREQ + i] = _src[k * NFREQ + i];
-}
-
 /*
     dim3 block(NFREQ, PTSPERBLOCK);
     dim3 grid((nP + PTSPERBLOCK - 1) / PTSPERBLOCK, ndir);
  */
 __global__ void trace_kernel(const int pointLo, const int nP, const int dirLo, const int dirOffs, GPUMeshViewRaw mv, real *Idirs, int *inner, point *ws) {
-    __shared__ MeshElement currTets[PTSPERBLOCK];
-
     int dir = dirLo + dirOffs + blockIdx.y;
     int ifreq = threadIdx.x;
     int blockPoint = threadIdx.y;
@@ -40,17 +25,17 @@ __global__ void trace_kernel(const int pointLo, const int nP, const int dirLo, c
 
     do {
         int face;
-        if (!idle)
-            fetch(currTets + blockPoint, mv.elems + itet);
-        __syncthreads();
         if (!idle) {
-            const MeshElement &currTet = currTets[blockPoint];
+            const MeshElement currTet = mv.elems[itet];
 
             real len = trace(w, currTet, r, face, mv.pts);
 
-            real delta = len * currTet.kappa[ifreq];
+            real kappa, Ip;
+            getProps(currTet, ifreq, kappa, Ip, w);
+
+            real delta = len * kappa;
             real q = exp(-delta);
-            b += a * currTet.Ip[ifreq] * (1 - q);
+            b += a * Ip * (1 - q);
             a *= q;
             itet = currTet.neib[face];
             if (itet == NO_TET) {

@@ -1,8 +1,8 @@
 algebraic3d
-solid box = orthobrick(-1, -1, -1; 1, 1, 1);
-solid core = sphere(0, 0, 0; 0.3);
+solid star = sphere(0, 0, 0; 0.35);
+solid atm = sphere(0, 0, 0; 10);
 
-solid air = box and not core;
+solid air = atm and not star;
 
-tlo core -col=[1,0,0];
+tlo star -col=[1,0,0];
 tlo air -col=[0,0,1] -transparent;

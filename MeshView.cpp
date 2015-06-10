@@ -1,10 +1,11 @@
 #include "MeshView.h"
+#include "mhd.h"
 
 #include <meshProcessor/mesh.h>
 
 using namespace mesh3d;
 
-MeshView::MeshView(const mesh &m) {
+MeshView::MeshView(const mesh &m, const MHDdata &mhd) : mhd(mhd) {
     convertMesh(m);
     setParams(m);
 }
@@ -44,16 +45,25 @@ void MeshView::setParams(const mesh &m) {
 
     for (int i = 0; i < nT; i++) {
         const tetrahedron &tet = m.tets(i);
+
+        elems[i].Te = 1;
+        elems[i].dvstep = 6.f / NFREQ;
+
         if (tet.color() == 1) {
-            for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
-                elems[i].kappa[ifreq] = pow(1 + ifreq, 2);
-                elems[i].Ip[ifreq] = 1;
-            }
+            elems[i].kappa0 = 1000;
+            elems[i].Ip0 = 1;
+            for (int i = 0; i < 3; i++)
+                elems[i].v[i] = 0;
+            elems[i].Teff = 100;
         } else {
-            for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
-                elems[i].kappa[ifreq] = 1 / (1. + ifreq);
-                elems[i].Ip[ifreq] = 0;
-            }
+            const auto p = tet.center();
+            const auto &pos = mhd.getCoordAndSide(p.x, p.y, p.z);
+
+            elems[i].kappa0 = mhd.kappa(pos);
+            elems[i].Ip0 = 0;
+            for (int i = 0; i < 3; i++)
+                elems[i].v[i] = mhd.velocity(pos, i);
+            elems[i].Teff = mhd.Teff(pos);
         }
     }
 }

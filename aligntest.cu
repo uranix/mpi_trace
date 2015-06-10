@@ -7,51 +7,45 @@ const char *realstr() {
 }
 
 struct AlignStats {
-    int offs_kappa;
-    int offs_Ip;
+    int offs_kappa0;
+    int offs_Ip0;
+    int offs_v;
+    int offs_Teff;
+    int offs_Te;
+    int offs_dvstep;
     int offs_p;
     int offs_neib;
-    int offs__padd;
     int size;
-    int quot, rem;
 };
 
 #define _(x) ret.offs_ ## x = offsetof(MeshElement, x);
 
 __global__ void test_gpu(AlignStats *_ret) {
     AlignStats &ret = *_ret;
-    _(kappa);
-    _(Ip);
+    _(kappa0);
+    _(Ip0);
+    _(v);
+    _(Teff);
+    _(Te);
+    _(dvstep);
     _(p);
     _(neib);
-    _(_padd);
     ret.size = sizeof(MeshElement);
-    int Nreal = sizeof(real) * NFREQ;
-    ret.quot = ret.size / Nreal;
-    ret.rem = ret.size % Nreal;
 }
 
 void test_host(AlignStats &ret) {
-    _(kappa);
-    _(Ip);
+    _(kappa0);
+    _(Ip0);
+    _(v);
+    _(Teff);
+    _(Te);
+    _(dvstep);
     _(p);
     _(neib);
-    _(_padd);
     ret.size = sizeof(MeshElement);
-    int Nreal = sizeof(real) * NFREQ;
-    ret.quot = ret.size / Nreal;
-    ret.rem = ret.size % Nreal;
 }
 
 bool alignment_test() {
-    std::cout << "struct MeshElement {\n";
-    std::cout << "\t" << realstr() << " kappa[" << NFREQ << "];\n";
-    std::cout << "\t" << realstr() << " Ip[" << NFREQ << "];\n";
-    std::cout << "\tint p[4];\n";
-    std::cout << "\tint neib[4];\n";
-    std::cout << "\tchar _padd[" << sizeof(MeshElement::_padd) << "];\n";
-    std::cout << "};\n";
-
     AlignStats host_as;
     AlignStats gpu_as;
 
@@ -72,14 +66,15 @@ bool alignment_test() {
 
     bool ok = true;
 
-    TEST(offs_kappa);
-    TEST(offs_Ip);
+    TEST(offs_kappa0);
+    TEST(offs_Ip0);
+    TEST(offs_v);
+    TEST(offs_Teff);
+    TEST(offs_Te);
+    TEST(offs_dvstep);
     TEST(offs_p);
     TEST(offs_neib);
-    TEST(offs__padd);
     TEST(size);
-    TEST(quot);
-    TEST(rem);
 
     return ok;
 }

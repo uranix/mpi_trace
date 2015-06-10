@@ -26,7 +26,7 @@ cuda_add_library(kernels STATIC gpu.cu kernels.cu aligntest.cu)
 add_executable(mesh_prepare mesh_prepare.cpp)
 target_link_libraries(mesh_prepare mesh3d ${METIS_LIBRARY})
 
-add_executable(main main.cpp umfsolve.cpp LebedevQuad.cpp MeshView.cpp)
+add_executable(main main.cpp umfsolve.cpp LebedevQuad.cpp MeshView.cpp mhd.cpp)
 target_link_libraries(main mesh3d kernels ${MPI_LIBRARIES} ${UMFPACK_LIBRARIES} ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES})
 
 if (MPI_COMPILE_FLAGS)

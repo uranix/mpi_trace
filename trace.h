@@ -167,4 +167,15 @@ UNIAPI inline real trace(const point &w, const MeshElement &t, point &r0, int &f
     return out.len;
 }
 
+UNIAPI inline void getProps(const MeshElement &tet, int ifreq, real &kappa, real &Ip, const point &w) {
+    const point v(tet.v[0], tet.v[1], tet.v[2]);
+    const real vk = dot(w, v);
+    const real pi = 3.14159265358979323;
+
+    const real dvi = tet.dvstep * (2 * ifreq - NFREQ + 1);
+
+    Ip = tet.Ip0 * exp(-0.5 * dvi * dvi / tet.Te);
+    kappa = tet.kappa0 / sqrt(2 * pi * tet.Teff) * exp(0.5 * (dvi - vk) * (vk - dvi) / tet.Teff);
+}
+
 #endif

@@ -4,20 +4,17 @@
 /* double is almost useless */
 typedef float real;
 
-/*
- * NFREQ % 4 shoud be 0
- * */
-#define NFREQ (4)
+#define NFREQ (16)
 
 struct MeshElement {
-    real  kappa[NFREQ];
-    real  Ip[NFREQ];
-    int   p[4];
-    int   neib[4];
-    char  _padd[
-        (NFREQ * sizeof(real) - 1) -
-        (2 * NFREQ * sizeof(real) + 8 * sizeof(int) - 1) % (NFREQ * sizeof(real))
-    ]; /* may be zero. GCC allows that */
+/* 0  */   real  kappa0;
+/* 4  */   real  Ip0;
+/* 8  */   real  v[3];
+/* 20 */   real  Teff;
+/* 24 */   real  Te;
+/* 28 */   real  dvstep; // ~ 6 / NFREQ
+/* 32 */   int   p[4];
+/* 48 */   int   neib[4];
 };
 
 /*

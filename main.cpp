@@ -2,6 +2,7 @@
 #include <meshProcessor/vtk_stream.h>
 
 #include "MeshView.h"
+#include "mhd.h"
 
 #include "LebedevQuad.h"
 
@@ -260,10 +261,13 @@ struct DirectionSolver {
                 int face;
                 const MeshElement &currTet = elems[itet];
                 real len = trace(w, currTet, r, face, &pts[0]);
+
                 for (int ifreq = 0; ifreq < NFREQ; ifreq++) {
-                    real delta = len * currTet.kappa[ifreq];
+                    real kappa, Ip;
+                    getProps(currTet, ifreq, kappa, Ip, w);
+                    real delta = len * kappa;
                     real q = exp(-delta);
-                    b[ifreq] += a[ifreq] * currTet.Ip[ifreq] * (1 - q);
+                    b[ifreq] += a[ifreq] * Ip * (1 - q);
                     a[ifreq] *= q;
                 }
                 itet = currTet.neib[face];
@@ -383,7 +387,8 @@ int main(int argc, char **argv) {
 
     std::fstream meshfile(std::string(argv[1]) + "." + std::to_string(rank) + ".m3d", std::ios::binary | std::ios::in);
     mesh m(meshfile);
-    MeshView mv(m);
+    MHDdata mhd(120, 51, "grid", "300dat");
+    MeshView mv(m, mhd);
 
     const int devmap[] = {0, 1, 2, 3, 4, 5, 6, 7};
 
